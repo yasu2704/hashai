@@ -243,7 +243,9 @@ if cmp -s "$test_dir/expected-success-buffer" "$TTY_BUFFER"; then
 fi
 
 failure_mutated="$test_dir/hashai.failure-mutated.zsh"
-sed 's/return 0/BUFFER=corrupted; CURSOR=0; return 0/' "$artifact" >"$failure_mutated"
+sed "s/print -u2 -- 'hashai: command generation failed; input preserved'/BUFFER=corrupted; CURSOR=0; print -u2 -- 'hashai: command generation failed; input preserved'/" \
+    "$artifact" >"$failure_mutated"
+grep -F 'BUFFER=corrupted; CURSOR=0' "$failure_mutated" >/dev/null
 run_tty "$failure_mutated" failure "$original" 5 e '# '
 if cmp -s "$test_dir/expected-preserved-buffer" "$TTY_BUFFER"; then
     if cmp -s "$test_dir/expected-preserved-cursor" "$TTY_CURSOR"; then
