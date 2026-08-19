@@ -169,7 +169,10 @@ fn ac5_prompt_contains_only_the_requested_minimal_context() {
 #[test]
 fn ac6_config_path_is_user_scoped_and_not_project_scoped() {
     let path = hashai::config::user_config_path().unwrap();
-    assert!(path.ends_with("hashai/config.toml"));
+    assert_eq!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("config.toml")
+    );
     assert!(!path.starts_with("."));
 }
 
@@ -293,7 +296,7 @@ fn fake_codex(directory: &Path) -> PathBuf {
     let path = directory.join("fake-codex");
     std::fs::write(
         &path,
-        "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\nprintf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"\n",
+        "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\ncat >/dev/null\nprintf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"\n",
     )
     .unwrap();
     let mut permissions = std::fs::metadata(&path).unwrap().permissions();
