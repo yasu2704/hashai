@@ -71,12 +71,12 @@ run_tty() {
         left_moves+=$'\e[D'
         ((move_count--))
     done
-    cat >"$commands" <<EOF
+cat >"$commands" <<EOF
+bindkey -$keymap
 source '$artifact_path'
 source '$artifact_path'
 bindkey -M emacs '^G' >'$binding.emacs'
 bindkey -M viins '^G' >'$binding.viins'
-bindkey -$keymap
 function __hashai_zsh_capture_buffer() {
     print -rn -- "\$BUFFER" >'$buffer'
     print -r -- "\$CURSOR" >'$cursor'

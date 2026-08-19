@@ -12,6 +12,10 @@ from zsh_zle_pty import marker_seen
 
 
 class MarkerSeenTests(unittest.TestCase):
+    def test_keymap_selection_precedes_artifact_installation(self) -> None:
+        harness = (pathlib.Path(__file__).parent / "zsh_zle_integration.sh").read_text()
+        self.assertLess(harness.index("bindkey -$keymap"), harness.index("source '$artifact_path'"))
+
     def test_setup_input_cannot_echo_the_complete_marker(self) -> None:
         marker = b"__HASHAI_PTY_READY__"
         setup = b"print -r -- '__HASHAI_PTY_''READY__'"
