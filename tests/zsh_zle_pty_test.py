@@ -16,6 +16,18 @@ class MarkerSeenTests(unittest.TestCase):
         harness = (pathlib.Path(__file__).parent / "zsh_zle_integration.sh").read_text()
         self.assertLess(harness.index("bindkey -$keymap"), harness.index("source '$artifact_path'"))
 
+    def test_widget_uses_the_install_time_tty_gate(self) -> None:
+        artifact = (pathlib.Path(__file__).parent.parent / "shell" / "hashai.zsh").read_text()
+        widget = artifact.split("__hashai_zsh_replace_buffer()", 1)[1].split(
+            "__hashai_zsh_install_binding()", 1
+        )[0]
+        installer = artifact.split("__hashai_zsh_install_binding()", 1)[1]
+        self.assertIn("[[ ${__hashai_zsh_zle_enabled:-} == 1 ]] || return 0", widget)
+        self.assertLess(
+            installer.index("[[ -o interactive && -t 0 && -t 1 && -t 2 ]] || return 0"),
+            installer.index("typeset -g __hashai_zsh_zle_enabled=1"),
+        )
+
     def test_setup_input_cannot_echo_the_complete_marker(self) -> None:
         marker = b"__HASHAI_PTY_READY__"
         setup = b"print -r -- '__HASHAI_PTY_''READY__'"

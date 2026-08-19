@@ -41,6 +41,7 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
                 assert!(contents.contains("__hashai_zsh_replace_buffer"));
                 assert!(contents.contains("HASHAI_TRIGGER"));
                 assert!(contents.contains("keybinding='^G'"));
+                assert!(contents.contains("__hashai_zsh_zle_enabled"));
                 assert!(contents.contains("bindkey -M emacs \"$keybinding\""));
                 assert!(contents.contains("bindkey -M viins \"$keybinding\""));
                 assert!(contents.contains("BUFFER"));

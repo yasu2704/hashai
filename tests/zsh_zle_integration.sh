@@ -95,9 +95,14 @@ function __hashai_zsh_capture_buffer() {
 }
 zle -N __hashai_zsh_capture_buffer
 bindkey '^X' __hashai_zsh_capture_buffer
+functions[__hashai_zsh_real]=\$functions[__hashai_zsh_replace_buffer]
+function __hashai_zsh_replace_buffer() {
+    __hashai_zsh_real
+    print -u2 -r -- '__HASHAI_PTY_''READY__'
+}
 EOF
     printf '%s\n\0' "$readiness_command" >>"$commands"
-    printf '%s%s\007\030' "$line" "$left_moves" >>"$commands"
+    printf '%s%s\007\0\030' "$line" "$left_moves" >>"$commands"
     if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"; then
@@ -123,9 +128,11 @@ EOF
 run_binding_dispatch() {
     local request="$test_dir/dispatch-request" commands="$test_dir/dispatch-commands"
     : >"$request"
-    printf "source '%s'\n%s\nzle -N __hashai_zsh_exit_widget\nbindkey '^X' __hashai_zsh_exit_widget\n%s\n\0" \
-        "$artifact" 'function __hashai_zsh_exit_widget() { BUFFER=exit; zle accept-line; }' "$readiness_command" >"$commands"
-    printf '%s\007\030' '# dispatch 日本語 😀' >>"$commands"
+    printf "source '%s'\n%s\n%s\nzle -N __hashai_zsh_exit_widget\nbindkey '^X' __hashai_zsh_exit_widget\n%s\n%s\n\0" \
+        "$artifact" 'functions[__hashai_zsh_real]=$functions[__hashai_zsh_replace_buffer]' \
+        "function __hashai_zsh_replace_buffer() { __hashai_zsh_real; print -u2 -r -- '__HASHAI_PTY_''READY__'; }" \
+        'function __hashai_zsh_exit_widget() { BUFFER=exit; zle accept-line; }' "$readiness_command" >"$commands"
+    printf '%s\007\0\030' '# dispatch 日本語 😀' >>"$commands"
     if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
