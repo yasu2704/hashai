@@ -222,6 +222,11 @@ fn command(data_home: &Path) -> Command {
 #[test]
 fn ac1_ac7_config_show_is_deterministic_and_redacts_prompt_content() {
     let temp = tempfile::tempdir().unwrap();
+    #[cfg(target_os = "macos")]
+    let config_dir = temp
+        .path()
+        .join("Library/Application Support/com.yasu2704.hashai");
+    #[cfg(not(target_os = "macos"))]
     let config_dir = temp.path().join("config/hashai");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
@@ -232,6 +237,7 @@ fn ac1_ac7_config_show_is_deterministic_and_redacts_prompt_content() {
     Command::cargo_bin("hashai").unwrap()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
         .env("XDG_DATA_HOME", temp.path().join("data"))
+        .env("HOME", temp.path())
         .env_remove("HASHAI_TRIGGER").env_remove("HASHAI_TRIGGER_ENABLED").env_remove("HASHAI_KEYBINDING")
         .args(["config", "show"])
         .assert().success()
