@@ -4,13 +4,114 @@ use std::{
 };
 
 use crate::{
-    config::Shell,
+    config::{Config, Keybinding, Shell},
     integration::{ARTIFACT_VERSION, IntegrationManager, UpdateSummary, WriteOutcome},
 };
 use fs2::FileExt;
 
 fn manager(temp: &tempfile::TempDir) -> IntegrationManager {
     IntegrationManager::new(temp.path().join("managed-integrations"))
+}
+
+#[test]
+fn ac3_ac4_ac6_artifacts_bake_safe_editor_settings_for_every_shell() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    let config = Config {
+        trigger: "`$; '\\ \t".into(),
+        keybinding: Keybinding::CtrlX,
+        ..Config::default()
+    };
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager
+            .generate_with_config(shell.clone(), &config)
+            .unwrap();
+        let artifact = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert!(artifact.contains("\\C-x") || artifact.contains("^X") || artifact.contains("\\cx"));
+        assert!(artifact.contains("HASHAI_TRIGGER")); // compatible enabled runtime override
+        assert!(!artifact.contains("HASHAI_KEYBINDING"));
+        assert!(!artifact.contains("eval"));
+    }
+}
+
+#[test]
+fn ac3_disabled_artifact_registers_no_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    let config = Config {
+        trigger_enabled: false,
+        ..Config::default()
+    };
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager
+            .generate_with_config(shell.clone(), &config)
+            .unwrap();
+        let artifact = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert!(
+            artifact.contains("__hashai_bash_enabled=0")
+                || artifact.contains("__hashai_zsh_enabled=0")
+                || artifact.contains("__hashai_fish_enabled_config 0")
+        );
+    }
+}
+
+#[test]
+fn invalid_public_config_cannot_write_or_update_any_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager.generate(shell.clone()).unwrap();
+    }
+    let before: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
+        .into_iter()
+        .map(|shell| {
+            (
+                shell.clone(),
+                fs::read(manager.artifact_path(&shell)).unwrap(),
+                manager.backup_path(&shell),
+            )
+        })
+        .collect();
+    let invalid = Config {
+        trigger: "bad\ntrigger".into(),
+        ..Config::default()
+    };
+    assert!(manager.update_with_config(&invalid).is_err());
+    assert!(manager.generate_with_config(Shell::Bash, &invalid).is_err());
+    for (shell, bytes, backup) in before {
+        assert_eq!(fs::read(manager.artifact_path(&shell)).unwrap(), bytes);
+        assert!(!backup.exists());
+    }
+}
+
+#[test]
+fn update_uses_one_config_snapshot_for_all_installed_shells() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager.generate(shell).unwrap();
+    }
+    let before: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
+        .into_iter()
+        .map(|shell| {
+            (
+                shell.clone(),
+                fs::read(manager.artifact_path(&shell)).unwrap(),
+            )
+        })
+        .collect();
+    let config = Config {
+        trigger: ",,".into(),
+        keybinding: Keybinding::CtrlX,
+        ..Config::default()
+    };
+    manager.update_with_config(&config).unwrap();
+    for (shell, old) in before {
+        let current = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert_ne!(current.as_bytes(), old.as_slice());
+        assert_eq!(fs::read(manager.backup_path(&shell)).unwrap(), old);
+        assert!(current.contains(",,"));
+    }
 }
 
 #[test]
@@ -52,8 +153,9 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
             Shell::Fish => {
                 assert!(contents.contains("__hashai_fish_replace_buffer"));
                 assert!(contents.contains("__hashai_fish_enabled"));
-                assert!(contents.contains("bind --mode default \\cg"));
-                assert!(contents.contains("bind --mode insert \\cg"));
+                assert!(contents.contains("__hashai_fish_keybinding \\cg"));
+                assert!(contents.contains("bind --mode default $__hashai_fish_keybinding"));
+                assert!(contents.contains("bind --mode insert $__hashai_fish_keybinding"));
                 assert!(contents.contains("hashai generate --shell fish --"));
                 assert!(!contents.contains("eval"));
             }

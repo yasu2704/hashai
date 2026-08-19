@@ -17,7 +17,10 @@ use directories::ProjectDirs;
 use fs2::FileExt;
 use tempfile::NamedTempFile;
 
-use crate::{HashaiError, config::Shell};
+use crate::{
+    HashaiError,
+    config::{Config, Keybinding, Shell, validate},
+};
 
 pub const ARTIFACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const VERSION_MARKER: &str = "# hashai-integration-version: ";
@@ -88,18 +91,34 @@ impl IntegrationManager {
     }
 
     pub fn generate(&self, shell: Shell) -> Result<WriteOutcome, HashaiError> {
+        self.generate_with_config(shell, &Config::default())
+    }
+
+    pub fn generate_with_config(
+        &self,
+        shell: Shell,
+        config: &Config,
+    ) -> Result<WriteOutcome, HashaiError> {
         validate_integration_shell(&shell)?;
-        self.with_write_lock(|| self.write_shell(&shell))
+        validate(config)?;
+        self.with_write_lock(|| self.write_shell(&shell, config))
     }
 
     pub fn update(&self) -> Result<UpdateSummary, HashaiError> {
+        self.update_with_config(&Config::default())
+    }
+
+    pub fn update_with_config(&self, config: &Config) -> Result<UpdateSummary, HashaiError> {
+        // This must precede even absence checks/locking so an invalid public
+        // Config can never create a directory, lock, backup, or partial update.
+        validate(config)?;
         if self.managed_directory_is_absent()? {
             return Ok(UpdateSummary::default());
         }
-        self.with_write_lock(|| self.update_locked())
+        self.with_write_lock(|| self.update_locked(config))
     }
 
-    fn update_locked(&self) -> Result<UpdateSummary, HashaiError> {
+    fn update_locked(&self, config: &Config) -> Result<UpdateSummary, HashaiError> {
         let mut summary = UpdateSummary::default();
         for shell in supported_shells() {
             let artifact = self.artifact_path(&shell);
@@ -113,7 +132,7 @@ impl IntegrationManager {
                 });
                 continue;
             }
-            match self.write_shell(&shell) {
+            match self.write_shell(&shell, config) {
                 Ok(outcome) => summary.outcomes.push((shell, outcome)),
                 Err(error) => summary.failures.push(UpdateFailure {
                     shell,
@@ -155,11 +174,11 @@ impl IntegrationManager {
         Ok(installed)
     }
 
-    fn write_shell(&self, shell: &Shell) -> Result<WriteOutcome, HashaiError> {
+    fn write_shell(&self, shell: &Shell, config: &Config) -> Result<WriteOutcome, HashaiError> {
         self.ensure_managed_directory()?;
         let target = self.artifact_path(shell);
         let backup = self.backup_path(shell);
-        let contents = artifact_contents(shell);
+        let contents = artifact_contents(shell, config);
 
         let existing = match fs::symlink_metadata(&target) {
             Ok(_) => {
@@ -327,19 +346,94 @@ fn artifact_version(contents: &str) -> Option<String> {
     })
 }
 
-fn artifact_contents(shell: &Shell) -> String {
+fn artifact_contents(shell: &Shell, config: &Config) -> String {
     let header = format!(
         "# hashai integration artifact for {}\n# hashai-integration-version: {ARTIFACT_VERSION}\n# This file intentionally does not invoke hashai or codex during shell startup.\n",
         shell.as_str()
     );
     match shell {
-        Shell::Bash => format!("{header}{BASH_INTEGRATION}"),
-        Shell::Zsh => format!("{header}{ZSH_INTEGRATION}"),
-        Shell::Fish => format!("{header}{FISH_INTEGRATION}"),
+        Shell::Bash => render(BASH_INTEGRATION, shell, config, &header),
+        Shell::Zsh => render(ZSH_INTEGRATION, shell, config, &header),
+        Shell::Fish => render(FISH_INTEGRATION, shell, config, &header),
         Shell::Auto => format!(
             "{header}# Shell editor bindings are installed by the shell-specific integration phase.\n"
         ),
     }
+}
+
+fn render(template: &str, shell: &Shell, config: &Config, header: &str) -> String {
+    let trigger = match shell {
+        Shell::Fish => fish_quote(&config.trigger),
+        _ => sh_quote(&config.trigger),
+    };
+    let key = match (shell, &config.keybinding) {
+        (Shell::Bash, Keybinding::CtrlG) => "\\C-g",
+        (Shell::Bash, Keybinding::CtrlX) => "\\C-x",
+        (Shell::Zsh, Keybinding::CtrlG) => "^G",
+        (Shell::Zsh, Keybinding::CtrlX) => "^X",
+        (Shell::Fish, Keybinding::CtrlG) => "\\cg",
+        (Shell::Fish, Keybinding::CtrlX) => "\\cx",
+        _ => "",
+    };
+    let rendered = match shell {
+        Shell::Bash => template
+            .replace(
+                "__hashai_bash_trigger='# '",
+                &format!("__hashai_bash_trigger={trigger}"),
+            )
+            .replace(
+                "__hashai_bash_keybinding='\\C-g'",
+                &format!("__hashai_bash_keybinding='{key}'"),
+            )
+            .replace(
+                "__hashai_bash_enabled=1",
+                &format!(
+                    "__hashai_bash_enabled={}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Zsh => template
+            .replace(
+                "typeset -g __hashai_zsh_trigger='# '",
+                &format!("typeset -g __hashai_zsh_trigger={trigger}"),
+            )
+            .replace(
+                "typeset -g __hashai_zsh_keybinding='^G'",
+                &format!("typeset -g __hashai_zsh_keybinding='{key}'"),
+            )
+            .replace(
+                "typeset -g __hashai_zsh_enabled=1",
+                &format!(
+                    "typeset -g __hashai_zsh_enabled={}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Fish => template
+            .replace(
+                "set -g __hashai_fish_trigger '# '",
+                &format!("set -g __hashai_fish_trigger {trigger}"),
+            )
+            .replace(
+                "set -g __hashai_fish_keybinding \\cg",
+                &format!("set -g __hashai_fish_keybinding {key}"),
+            )
+            .replace(
+                "set -g __hashai_fish_enabled_config 1",
+                &format!(
+                    "set -g __hashai_fish_enabled_config {}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Auto => template.to_owned(),
+    };
+    format!("{header}{rendered}")
+}
+
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+fn fish_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[cfg(test)]

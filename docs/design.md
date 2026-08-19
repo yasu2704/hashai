@@ -345,6 +345,7 @@ truncating `>` / `>|` はdangerous（fd duplicateと`/dev/null`は除く）。`r
 
 ```toml
 trigger = "# "
+trigger_enabled = true
 keybinding = "ctrl-g"
 shell = "auto"
 timeout_seconds = 30
@@ -357,7 +358,7 @@ reasoning_effort = "low"
 extra_instructions = "Prefer rg over grep when available."
 ```
 
-優先順位は、CLI引数、環境変数、ユーザー設定、組み込みデフォルトの順とする。初期リリースでは未信頼リポジトリから挙動を変更されないよう、プロジェクト設定を読み込まない。`prompt.extra_instructions` はユーザー設定でのみ指定できる。`review` と `dangerous` の警告は無効化できない。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
+優先順位は、CLI引数、環境変数、ユーザー設定、組み込みデフォルトの順とする。editor integration の一過性の上書きは `integration generate` と `integration update`、`config show` の `--trigger`、`--keybinding`、`--disable-trigger` で指定できる。`--trigger` と `--disable-trigger` は同時に指定できない。環境変数は `HASHAI_TRIGGER`（互換）、`HASHAI_TRIGGER_ENABLED=true|false`、`HASHAI_KEYBINDING=ctrl-g|ctrl-x` を使用する。生成済みartifactでは有効時に限り `HASHAI_TRIGGER` を実行時互換上書きとして読むが、keybinding は生成時に固定する。初期リリースでは未信頼リポジトリから挙動を変更されないよう、プロジェクト設定を読み込まない。`prompt.extra_instructions` はユーザー設定でのみ指定できる。`review` と `dangerous` の警告は無効化できない。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
 
 ## 13. CLI案
 

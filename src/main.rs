@@ -8,7 +8,7 @@ use std::{
 use clap::{Parser, error::ErrorKind};
 use hashai::{
     HashaiError,
-    cli::{Cli, Command, IntegrationCommand},
+    cli::{Cli, Command, ConfigCommand, IntegrationCommand, IntegrationOverrideArgs},
     config::{ConfigOverrides, ConfigSources},
     integration::{IntegrationManager, WriteOutcome},
     platform,
@@ -46,6 +46,9 @@ fn run() -> Result<(), HashaiError> {
     match cli.command {
         Command::Generate(args) => run_generate(args),
         Command::Integration(args) => run_integration(args.command),
+        Command::Config(args) => match args.command {
+            ConfigCommand::Show(args) => run_config_show(args),
+        },
     }
 }
 
@@ -104,6 +107,36 @@ fn run_generate(args: hashai::cli::GenerateArgs) -> Result<(), HashaiError> {
     Ok(())
 }
 
+fn overrides(args: IntegrationOverrideArgs) -> ConfigOverrides {
+    ConfigOverrides {
+        trigger: args.trigger,
+        keybinding: args.keybinding,
+        trigger_enabled: args.disable_trigger.then_some(false),
+        ..ConfigOverrides::default()
+    }
+}
+
+fn run_config_show(args: hashai::cli::ConfigShowArgs) -> Result<(), HashaiError> {
+    let config = ConfigSources::from_system(ConfigOverrides {
+        trigger: args.trigger,
+        keybinding: args.keybinding,
+        trigger_enabled: args.disable_trigger.then_some(false),
+        ..ConfigOverrides::default()
+    })?;
+    println!(
+        "trigger = {:?}\ntrigger_enabled = {}\nkeybinding = {:?}\nprompt.extra_instructions = {}",
+        config.trigger,
+        config.trigger_enabled,
+        config.keybinding.as_str(),
+        if config.prompt.extra_instructions.is_some() {
+            "\"<set>\""
+        } else {
+            "\"<unset>\""
+        }
+    );
+    Ok(())
+}
+
 fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
     let manager = IntegrationManager::from_system()?;
     match command {
@@ -114,11 +147,13 @@ fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
                 )
             })?;
             let shell = hashai::config::Shell::parse(&requested_shell)?;
-            let outcome = manager.generate(shell.clone())?;
+            let config = ConfigSources::from_system(overrides(args.overrides))?;
+            let outcome = manager.generate_with_config(shell.clone(), &config)?;
             print_write_result(&shell, manager.artifact_path(&shell), outcome);
         }
-        IntegrationCommand::Update => {
-            let summary = manager.update()?;
+        IntegrationCommand::Update(args) => {
+            let config = ConfigSources::from_system(overrides(args))?;
+            let summary = manager.update_with_config(&config)?;
             for (shell, outcome) in summary.outcomes {
                 print_write_result(&shell, manager.artifact_path(&shell), outcome);
             }
