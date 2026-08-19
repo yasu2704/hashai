@@ -17,6 +17,24 @@ def write_all(fd: int, data: bytes) -> None:
         data = data[written:]
 
 
+def read_until_marker(fd: int, marker: bytes, deadline: float) -> None:
+    """Forward PTY output until setup has returned to an interactive prompt."""
+    received = b""
+    while marker not in received:
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"Zsh did not emit PTY readiness marker {marker!r}")
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if not ready:
+            continue
+        try:
+            output = os.read(fd, 4096)
+        except OSError:
+            continue
+        received = (received + output)[-len(marker) :]
+        sys.stdout.buffer.write(output)
+        sys.stdout.buffer.flush()
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: zsh_zle_pty.py COMMANDS_FILE")
@@ -34,11 +52,10 @@ def main() -> int:
     os.close(slave)
     os.set_blocking(master, False)
     try:
-        time.sleep(0.1)
         for index, commands in enumerate(command_groups):
             write_all(master, commands)
             if index + 1 < len(command_groups):
-                time.sleep(0.5)
+                read_until_marker(master, b"__HASHAI_PTY_READY__", time.monotonic() + 10)
         deadline = time.monotonic() + 10
         while process.poll() is None:
             if time.monotonic() >= deadline:

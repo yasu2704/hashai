@@ -44,6 +44,10 @@ chmod +x "$fake_bin/hashai"
 assert_file_equals() {
     local expected=$1 actual=$2
     if ! cmp -s "$expected" "$actual"; then
+        if [[ -n ${TTY_LOG:-} && -f $TTY_LOG ]]; then
+            printf '%s\n' 'Zsh PTY log follows:' >&2
+            cat "$TTY_LOG" >&2
+        fi
         diff -u "$expected" "$actual" >&2 || true
         exit 1
     fi
@@ -77,10 +81,16 @@ function __hashai_zsh_capture_buffer() {
 zle -N __hashai_zsh_capture_buffer
 bindkey '^X' __hashai_zsh_capture_buffer
 EOF
+    printf '%s\n\0' 'print -r -- __HASHAI_PTY_READY__' >>"$commands"
     printf '%s%s\007\030\025exit\n' "$line" "$left_moves" >>"$commands"
     PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"
+    if [[ ! -f $buffer || ! -f $cursor ]]; then
+        printf '%s\n' 'Zsh PTY did not produce a capture manifest; log follows:' >&2
+        cat "$test_dir/tty.log" >&2
+        return 1
+    fi
     grep -F '__hashai_zsh_replace_buffer' "$binding.emacs" >/dev/null
     grep -F '__hashai_zsh_replace_buffer' "$binding.viins" >/dev/null
     TTY_BUFFER=$buffer
@@ -92,7 +102,7 @@ EOF
 run_binding_dispatch() {
     local request="$test_dir/dispatch-request" commands="$test_dir/dispatch-commands"
     : >"$request"
-    printf "source '%s'\n\0" "$artifact" >"$commands"
+    printf "source '%s'\nprint -r -- __HASHAI_PTY_READY__\n\0" "$artifact" >"$commands"
     printf '%s\007\025exit\n' '# dispatch 日本語 😀' >>"$commands"
     PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
