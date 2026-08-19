@@ -171,18 +171,78 @@ fn private_temp_file() -> Result<NamedTempFile, HashaiError> {
 }
 
 fn terminate_process_group(child: &mut std::process::Child) -> Result<(), HashaiError> {
-    let group = -(child.id() as i32);
-    unsafe { libc::kill(group, libc::SIGTERM) };
-    let deadline = Instant::now() + Duration::from_millis(200);
-    while Instant::now() < deadline {
-        if child.try_wait()?.is_some() {
-            return Ok(());
+    let group = child.id() as i32;
+    let mut leader_reaped = false;
+
+    signal_process_group(group, libc::SIGTERM)?;
+    if !wait_for_process_group_exit(
+        child,
+        group,
+        Instant::now() + Duration::from_millis(200),
+        &mut leader_reaped,
+    )? {
+        signal_process_group(group, libc::SIGKILL)?;
+        if !wait_for_process_group_exit(
+            child,
+            group,
+            Instant::now() + Duration::from_secs(2),
+            &mut leader_reaped,
+        )? {
+            return Err(HashaiError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Codex process group did not exit after SIGKILL",
+            )));
+        }
+    }
+
+    if !leader_reaped {
+        let _ = child.wait()?;
+    }
+    Ok(())
+}
+
+fn signal_process_group(group: i32, signal: i32) -> Result<(), HashaiError> {
+    let result = unsafe { libc::kill(-group, signal) };
+    if result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error.into());
+        }
+    }
+    Ok(())
+}
+
+fn wait_for_process_group_exit(
+    child: &mut std::process::Child,
+    group: i32,
+    deadline: Instant,
+    leader_reaped: &mut bool,
+) -> Result<bool, HashaiError> {
+    loop {
+        if !*leader_reaped {
+            *leader_reaped = child.try_wait()?.is_some();
+        }
+        if !process_group_exists(group)? {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
         }
         thread::sleep(Duration::from_millis(10));
     }
-    unsafe { libc::kill(group, libc::SIGKILL) };
-    let _ = child.wait()?;
-    Ok(())
+}
+
+fn process_group_exists(group: i32) -> Result<bool, HashaiError> {
+    let result = unsafe { libc::kill(-group, 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(error.into()),
+    }
 }
 
 #[derive(Deserialize)]

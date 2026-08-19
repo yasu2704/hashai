@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use hashai::{
@@ -15,6 +15,8 @@ use hashai::{
     runner::{CodexRunner, RunRequest},
 };
 use tempfile::TempDir;
+
+const WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn fake(temp: &TempDir, body: &str) -> PathBuf {
     let path = temp.path().join("fake-codex");
@@ -38,6 +40,32 @@ fn request(executable: PathBuf, temp: &TempDir) -> RunRequest {
     }
 }
 
+fn wait_for_file(path: &Path, description: &str) {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {description}: {}",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn assert_process_gone(pid: i32) {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    loop {
+        if unsafe { libc::kill(pid, 0) } == -1 {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "descendant {pid} survived process-group termination"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn ac1_ac2_ac3_passes_stdin_cwd_fixed_arguments_and_private_temp_files() {
     let temp = TempDir::new().unwrap();
@@ -48,8 +76,9 @@ fn ac1_ac2_ac3_passes_stdin_cwd_fixed_arguments_and_private_temp_files() {
         format!(r#"cat >> "{}""#, capture.display()),
         "schema=''; out=''".to_owned(),
         "while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-schema) schema=\"$2\"; shift 2;; --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done".to_owned(),
-        "[ \"$(stat -c '%a' \"$schema\")\" = 600 ]".to_owned(),
-        "[ \"$(stat -c '%a' \"$out\")\" = 600 ]".to_owned(),
+        "file_mode() { if [ \"$(uname)\" = Darwin ]; then stat -f '%Lp' \"$1\"; else stat -c '%a' \"$1\"; fi; }".to_owned(),
+        "[ \"$(file_mode \"$schema\")\" = 600 ]".to_owned(),
+        "[ \"$(file_mode \"$out\")\" = 600 ]".to_owned(),
         r#"printf '%s' '{"command":"find . -type f","risk":"safe"}' > "$out""#.to_owned(),
     ].join("\n");
     let result = CodexRunner::new()
@@ -171,9 +200,7 @@ fn ac7_removes_private_temp_files_after_timeout_and_cancel() {
         let result = thread::scope(|scope| {
             if cancelled_case {
                 scope.spawn(|| {
-                    while !paths.exists() {
-                        thread::sleep(Duration::from_millis(5));
-                    }
+                    wait_for_file(&paths, "temporary-file marker");
                     cancelled.store(true, Ordering::SeqCst);
                 });
             }
@@ -197,12 +224,15 @@ fn ac7_removes_private_temp_files_after_timeout_and_cancel() {
 }
 
 #[test]
-fn ac6_timeout_terminates_the_entire_process_group() {
+fn ac6_timeout_escalates_past_a_term_ignoring_descendant() {
     let temp = TempDir::new().unwrap();
     let descendant = temp.path().join("descendant.pid");
     let fake = fake(
         &temp,
-        &format!("sleep 30 & echo $! > {}; wait", descendant.display()),
+        &format!(
+            "(trap '' TERM; exec sleep 30) & echo $! > {}; wait",
+            descendant.display()
+        ),
     );
     let mut task = request(fake, &temp);
     task.timeout = Duration::from_millis(100);
@@ -210,36 +240,39 @@ fn ac6_timeout_terminates_the_entire_process_group() {
         .run(task, &AtomicBool::new(false))
         .unwrap_err();
     assert_eq!(error.exit_code(), ExitCode::Timeout as i32);
+    wait_for_file(&descendant, "timeout descendant marker");
     let pid = fs::read_to_string(descendant)
         .unwrap()
         .trim()
         .parse::<i32>()
         .unwrap();
-    thread::sleep(Duration::from_millis(50));
-    assert_eq!(
-        unsafe { libc::kill(pid, 0) },
-        -1,
-        "descendant {pid} survived timeout"
-    );
+    assert_process_gone(pid);
 }
 
 #[test]
-fn ac6_cancel_terminates_the_entire_process_group() {
+fn ac6_cancel_escalates_past_a_term_ignoring_descendant() {
     let temp = TempDir::new().unwrap();
     let descendant = temp.path().join("descendant.pid");
     let fake = fake(
         &temp,
-        &format!("sleep 30 & echo $! > {}; wait", descendant.display()),
+        &format!(
+            "(trap '' TERM; exec sleep 30) & echo $! > {}; wait",
+            descendant.display()
+        ),
     );
     let cancelled = AtomicBool::new(false);
     let result = thread::scope(|scope| {
         scope.spawn(|| {
-            while !descendant.exists() {
-                thread::sleep(Duration::from_millis(5));
-            }
+            wait_for_file(&descendant, "cancel descendant marker");
             cancelled.store(true, Ordering::SeqCst);
         });
         CodexRunner::new().run(request(fake, &temp), &cancelled)
     });
     assert_eq!(result.unwrap_err().exit_code(), ExitCode::Cancelled as i32);
+    let pid = fs::read_to_string(descendant)
+        .unwrap()
+        .trim()
+        .parse::<i32>()
+        .unwrap();
+    assert_process_gone(pid);
 }
