@@ -27,7 +27,17 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
         let contents = fs::read_to_string(&artifact).unwrap();
         assert!(contents.contains(&format!("# hashai-integration-version: {ARTIFACT_VERSION}")));
         assert!(contents.contains("does not invoke hashai or codex during shell startup"));
-        assert!(is_comments_only(&contents), "{}", artifact.display());
+        if shell == Shell::Bash {
+            assert!(contents.contains("__hashai_bash_replace_line"));
+            assert!(contents.contains("HASHAI_TRIGGER"));
+            assert!(contents.contains("keybinding='\\C-g'"));
+            assert!(contents.contains("READLINE_LINE"));
+            assert!(contents.contains("READLINE_POINT"));
+            assert!(contents.contains("hashai generate --shell bash --"));
+            assert!(!contents.contains("eval"));
+        } else {
+            assert!(is_comments_only(&contents), "{}", artifact.display());
+        }
     }
 }
 

@@ -6,6 +6,37 @@ on:
     branches: [main]
 
 jobs:
+  bash-readline:
+    name: Bash Readline integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install supported Bash and ShellCheck
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install --yes shellcheck
+            echo "BASH_BIN=$(command -v bash)" >> "$GITHUB_ENV"
+          else
+            brew install bash shellcheck
+            echo "BASH_BIN=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+          fi
+      - run: $BASH_BIN -c 'test "${BASH_VERSINFO[0]}" -gt 5 || { test "${BASH_VERSINFO[0]}" -eq 5 && test "${BASH_VERSINFO[1]}" -ge 2; }'
+      - run: cargo build
+      - run: $BASH_BIN -n shell/hashai.bash tests/bash_readline_integration.sh
+      - run: shellcheck shell/hashai.bash tests/bash_readline_integration.sh
+      - run: HASHAI_BIN=target/debug/hashai HASHAI_BASH_BIN=$BASH_BIN $BASH_BIN tests/bash_readline_integration.sh
+      - name: Bash 4 syntax contract
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          docker run --rm -v "$PWD:/src:ro" bash:4.4 bash -n /src/shell/hashai.bash
+          docker run --rm -v "$PWD:/src:ro" bash:4.4 bash -c 'source /src/shell/hashai.bash; declare -F __hashai_bash_replace_line'
+
   quality:
     name: ${{ matrix.os }} quality
     runs-on: ${{ matrix.os }}
