@@ -219,6 +219,10 @@ fn ac4_ac5_cli_maps_success_invalid_output_and_process_errors_to_documented_code
             ExitCode::InvalidOutput as i32,
         ),
         (
+            output_file_writer(r#"{"command":"echo ok","risk":"unknown"}"#),
+            ExitCode::InvalidOutput as i32,
+        ),
+        (
             "echo 'codex login is required' >&2\nexit 1".to_owned(),
             ExitCode::Unauthenticated as i32,
         ),
@@ -253,6 +257,18 @@ fn ac4_ac5_cli_maps_success_invalid_output_and_process_errors_to_documented_code
         .args(["generate", "--shell", "powershell", "list files"])
         .assert()
         .code(ExitCode::ArgumentOrConfig as i32)
+        .stdout("");
+
+    let temp = TempDir::new().unwrap();
+    let fake = fake_codex(
+        &temp,
+        &output_file_writer(&json_response("echo ok", "safe")),
+    );
+    command_with(&temp, &fake)
+        .env("HASHAI_TEST_OS", "windows")
+        .args(["generate", "--shell", "bash", "list files"])
+        .assert()
+        .code(ExitCode::UnsupportedPlatform as i32)
         .stdout("");
 }
 

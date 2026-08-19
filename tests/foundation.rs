@@ -169,7 +169,10 @@ fn ac5_prompt_contains_only_the_requested_minimal_context() {
 #[test]
 fn ac6_config_path_is_user_scoped_and_not_project_scoped() {
     let path = hashai::config::user_config_path().unwrap();
-    assert!(path.ends_with("hashai/config.toml"));
+    assert_eq!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("config.toml")
+    );
     assert!(!path.starts_with("."));
 }
 

@@ -137,7 +137,13 @@ fn ac4_rejects_empty_invalid_and_schema_violating_output() {
         r#"{"command":" ","risk":"safe"}"#,
     ] {
         let temp = TempDir::new().unwrap();
-        let body = ["out=''", "while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done", &format!("printf '%s' '{output}' > \"$out\"")].join("\n");
+        let body = [
+            "out=''",
+            "while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done",
+            "cat >/dev/null",
+            &format!("printf '%s' '{output}' > \"$out\""),
+        ]
+        .join("\n");
         let error = CodexRunner::new()
             .run(request(fake(&temp, &body), &temp), &AtomicBool::new(false))
             .unwrap_err();
@@ -159,7 +165,13 @@ fn ac5_classifies_known_errors_and_leaves_unknown_as_general() {
         let temp = TempDir::new().unwrap();
         let error = CodexRunner::new()
             .run(
-                request(fake(&temp, &format!("echo '{stderr}' >&2; exit 1")), &temp),
+                request(
+                    fake(
+                        &temp,
+                        &format!("cat >/dev/null; echo '{stderr}' >&2; exit 1"),
+                    ),
+                    &temp,
+                ),
                 &AtomicBool::new(false),
             )
             .unwrap_err();
@@ -180,7 +192,15 @@ fn ac7_removes_private_temp_files_after_success_and_error() {
     for exit_code in [0, 1] {
         let temp = TempDir::new().unwrap();
         let paths = temp.path().join("paths");
-        let body = ["schema=''; out=''", "while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-schema) schema=\"$2\"; shift 2;; --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done", &format!("printf '%s\\n%s\\n' \"$schema\" \"$out\" > {}", paths.display()), "printf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"", &format!("exit {exit_code}")].join("\n");
+        let body = [
+            "schema=''; out=''",
+            "while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-schema) schema=\"$2\"; shift 2;; --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done",
+            "cat >/dev/null",
+            &format!("printf '%s\\n%s\\n' \"$schema\" \"$out\" > {}", paths.display()),
+            "printf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"",
+            &format!("exit {exit_code}"),
+        ]
+        .join("\n");
         let _ = CodexRunner::new().run(request(fake(&temp, &body), &temp), &AtomicBool::new(false));
         for path in fs::read_to_string(paths).unwrap().lines() {
             assert!(
