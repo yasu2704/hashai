@@ -18,8 +18,17 @@ class MarkerTests(unittest.TestCase):
         self.assertTrue(seen); self.assertEqual(tail, b"")
 
     def test_setup_echo_cannot_contain_complete_marker(self):
-        setup = b"echo __HASHAI_FISH_''READY__"
+        setup = b"echo '__HASHAI_FISH_'READY__"
         self.assertNotIn(self.marker, setup)
+
+    def test_split_marker_command_emits_exact_marker(self):
+        import subprocess
+        command = "echo '__HASHAI_FISH_'READY__"
+        output = subprocess.run(
+            [os.environ["HASHAI_FISH_BIN"], "--no-config", "-c", command],
+            check=True, capture_output=True, text=True,
+        )
+        self.assertEqual(output.stdout, "__HASHAI_FISH_READY__\n")
 
     def test_selected_fish_binary_is_used(self):
         fish = os.environ["HASHAI_FISH_BIN"]
