@@ -33,7 +33,7 @@ pub struct RunRequest {
     pub timeout: Duration,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Risk {
     Safe,
     Review,

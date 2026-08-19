@@ -291,20 +291,22 @@ eval "$(hashai generate '不要ファイルを消して')"
 
 ### 10.2 警告対象
 
-以下を含む場合は、少なくとも `review` または `dangerous` として扱う。
+local analyzer は純粋な字句検査であり、安全性を証明しない。最終riskは
+`safe < review < dangerous` のmodel/local最大値とし、未知・曖昧・不完全な構文は
+`review` とする。以下のcommand-position classは `dangerous` とする。
 
 - `rm`、`rmdir`、ファイルの上書き
 - `sudo`、`su`
-- `dd`、`mkfs`、パーティション操作
+- `dd`、`mkfs*`、`fdisk` family、破壊的な`parted`/`diskutil`
 - `chmod -R`、`chown -R`
-- `git reset --hard`、`git clean`
+- `git reset --hard`、dry-run以外の`git clean`
 - `git push --force`、`git push -f`
 - `curl ... | sh` や同等のリモートコード実行
 - プロセスの一括終了
 - データベースの削除・切り詰め
-- 複数行スクリプト、heredoc、複雑なコマンド置換
+- 複数行スクリプト、heredoc/here-string、パイプ、複雑なコマンド置換、非truncating/曖昧なredirect
 
-モデルの `risk` とローカル解析の判定を比較し、より高い危険度を最終判定として採用する。ローカル解析は危険度を引き上げることだけができ、モデルの判定を引き下げない。初期実装では、危険なコマンド、オプション、リダイレクト、パイプ、複数行構文を保守的に検出する。
+truncating `>` / `>|` はdangerous（fd duplicateと`/dev/null`は除く）。`review` と`dangerous`はstdoutのcommandを変更せず、無効化不可能なstderr warningを表示する。ローカル解析は危険度を引き上げることだけができ、モデルの判定を引き下げない。
 
 文字列やトークンに基づく検査は補助的な警告に留める。難読化、エイリアス、スクリプト経由などを完全には検出できないためであり、ローカル解析も安全性を保証する境界とはしない。
 

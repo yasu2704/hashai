@@ -5,6 +5,7 @@ pub mod config;
 pub mod integration;
 pub mod platform;
 pub mod prompt;
+pub mod risk;
 pub mod runner;
 
 #[cfg(test)]
