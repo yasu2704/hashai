@@ -11,6 +11,11 @@ __hashai_bash_replace_line() {
     local trigger=${HASHAI_TRIGGER:-$__hashai_bash_trigger}
     local request command output
 
+    # The binding installer is normally the only entry point, but retaining
+    # this guard also makes an explicitly disabled generated artifact inert if
+    # its function is invoked directly by another Readline customization.
+    [[ $__hashai_bash_enabled == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
+
     # bind -x is meaningful only for an interactive terminal. In particular,
     # do not run Core when a sourced artifact is used by a script or a pipe.
     [[ -t 0 && -t 1 && -t 2 ]] || return 0
