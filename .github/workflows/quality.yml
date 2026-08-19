@@ -59,7 +59,7 @@ jobs:
       - run: $ZSH_BIN -fc 'autoload -Uz is-at-least; is-at-least 5.8'
       - run: cargo build
       - run: $ZSH_BIN -n shell/hashai.zsh
-      - run: python3 -m unittest tests/zsh_zle_pty_test.py
+      - run: HASHAI_ZSH_BIN=$ZSH_BIN python3 -m unittest tests/zsh_zle_pty_test.py
       - run: HASHAI_BIN=target/debug/hashai HASHAI_ZSH_BIN=$ZSH_BIN bash tests/zsh_zle_integration.sh
 
   quality:

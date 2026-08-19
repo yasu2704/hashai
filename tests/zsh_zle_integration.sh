@@ -23,7 +23,7 @@ export XDG_DATA_HOME="$test_dir/data"
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
 # The emitted marker must not appear verbatim in setup input: a terminal echoes
 # typed setup before Zsh executes it, and the PTY runner waits on the output.
-readiness_command="print -r -- '__HASHAI_PTY_'\"'READY__'"
+readiness_command="print -r -- '__HASHAI_PTY_''READY__'"
 
 fake_bin="$test_dir/bin"
 mkdir -p "$fake_bin"

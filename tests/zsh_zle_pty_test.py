@@ -2,6 +2,8 @@
 """Focused tests for Zsh PTY readiness-marker framing."""
 
 import pathlib
+import os
+import subprocess
 import sys
 import unittest
 
@@ -12,8 +14,18 @@ from zsh_zle_pty import marker_seen
 class MarkerSeenTests(unittest.TestCase):
     def test_setup_input_cannot_echo_the_complete_marker(self) -> None:
         marker = b"__HASHAI_PTY_READY__"
-        setup = b"print -r -- '__HASHAI_PTY_'\"'READY__'"
+        setup = b"print -r -- '__HASHAI_PTY_''READY__'"
         self.assertNotIn(marker, setup)
+
+    def test_setup_command_emits_the_exact_marker(self) -> None:
+        marker = "__HASHAI_PTY_READY__"
+        output = subprocess.run(
+            [os.environ["HASHAI_ZSH_BIN"], "-fc", "print -r -- '__HASHAI_PTY_''READY__'"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(output.stdout, f"{marker}\n")
 
     def test_detects_marker_followed_by_prompt_bytes(self) -> None:
         marker = b"__HASHAI_PTY_READY__"
