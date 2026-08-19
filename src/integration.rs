@@ -54,24 +54,21 @@ pub struct IntegrationManager {
 }
 
 impl IntegrationManager {
-    pub fn new(directory: PathBuf) -> Self {
+    pub(crate) fn new(directory: PathBuf) -> Self {
         Self { directory }
     }
 
     pub fn from_system() -> Result<Self, HashaiError> {
-        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty())
-        {
-            return Ok(Self::new(
-                PathBuf::from(data_home).join("hashai/integrations"),
-            ));
-        }
-
         let directories = ProjectDirs::from("com", "yasu2704", "hashai").ok_or_else(|| {
             HashaiError::ArgumentOrConfig(
                 "could not determine user data directory for integrations".to_owned(),
             )
         })?;
-        Ok(Self::new(directories.data_local_dir().join("integrations")))
+        let xdg_data_home = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from);
+        Ok(Self::new(resolve_integration_directory(
+            xdg_data_home.as_deref(),
+            directories.data_local_dir().join("integrations"),
+        )))
     }
 
     pub fn directory(&self) -> &Path {
@@ -93,7 +90,7 @@ impl IntegrationManager {
     }
 
     pub fn update(&self) -> Result<UpdateSummary, HashaiError> {
-        if !self.directory.exists() {
+        if self.managed_directory_is_absent()? {
             return Ok(UpdateSummary::default());
         }
         self.with_write_lock(|| self.update_locked())
@@ -125,7 +122,7 @@ impl IntegrationManager {
     }
 
     pub fn list(&self) -> Result<Vec<InstalledIntegration>, HashaiError> {
-        if !self.directory.exists() {
+        if self.managed_directory_is_absent()? {
             return Ok(Vec::new());
         }
         self.ensure_managed_directory()?;
@@ -248,6 +245,24 @@ impl IntegrationManager {
         }
         Ok(())
     }
+
+    fn managed_directory_is_absent(&self) -> Result<bool, HashaiError> {
+        match fs::symlink_metadata(&self.directory) {
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(HashaiError::Integration(format!(
+                "could not inspect managed integration directory {}: {error}",
+                self.directory.display()
+            ))),
+        }
+    }
+}
+
+fn resolve_integration_directory(xdg_data_home: Option<&Path>, fallback: PathBuf) -> PathBuf {
+    match xdg_data_home.filter(|path| path.is_absolute()) {
+        Some(data_home) => data_home.join("hashai/integrations"),
+        None => fallback,
+    }
 }
 
 fn supported_shells() -> [Shell; 3] {
@@ -318,9 +333,25 @@ fn artifact_contents(shell: &Shell) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Write};
+    use std::{
+        fs,
+        io::Write,
+        path::{Path, PathBuf},
+    };
 
     use super::atomic_write_with;
+
+    #[test]
+    fn relative_xdg_data_home_is_ignored_in_favor_of_the_platform_data_directory() {
+        let fallback = PathBuf::from("/platform-data/hashai/integrations");
+        assert_eq!(
+            super::resolve_integration_directory(
+                Some(Path::new("relative-data")),
+                fallback.clone()
+            ),
+            fallback
+        );
+    }
 
     #[test]
     fn fault_injected_target_write_after_backup_keeps_live_bytes_unchanged() {

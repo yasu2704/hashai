@@ -7,6 +7,9 @@ pub mod platform;
 pub mod prompt;
 pub mod runner;
 
+#[cfg(test)]
+mod integration_artifacts_tests;
+
 use std::fmt;
 
 /// Process exit codes documented in `docs/design.md` section 11.1.

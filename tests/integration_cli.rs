@@ -4,6 +4,7 @@ use std::{fs, path::Path};
 
 use assert_cmd::Command;
 use hashai::integration::ARTIFACT_VERSION;
+use predicates::prelude::PredicateBooleanExt;
 
 #[test]
 fn ac1_ac2_ac6_cli_generates_lists_and_repeats_managed_artifacts() {
@@ -72,6 +73,19 @@ fn ac1_generate_keeps_the_documented_positional_shell_form() {
         .assert()
         .success()
         .stdout(format!("fish\twritten\t{}\n", expected.display()));
+}
+
+#[test]
+fn ac7_cli_ignores_relative_xdg_data_home() {
+    let temp = tempfile::tempdir().unwrap();
+    Command::cargo_bin("hashai")
+        .unwrap()
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", "relative-data-home")
+        .args(["integration", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("relative-data-home").not());
 }
 
 #[test]

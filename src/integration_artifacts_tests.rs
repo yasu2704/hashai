@@ -3,11 +3,11 @@ use std::{
     sync::{Arc, Barrier},
 };
 
-use fs2::FileExt;
-use hashai::{
+use crate::{
     config::Shell,
     integration::{ARTIFACT_VERSION, IntegrationManager, UpdateSummary, WriteOutcome},
 };
+use fs2::FileExt;
 
 fn manager(temp: &tempfile::TempDir) -> IntegrationManager {
     IntegrationManager::new(temp.path().join("managed-integrations"))
@@ -184,6 +184,26 @@ fn ac8_list_and_update_handle_no_installed_artifacts_without_writing() {
     assert!(manager.list().unwrap().is_empty());
     assert_eq!(manager.update().unwrap(), UpdateSummary::default());
     assert!(!manager.directory().exists());
+}
+
+#[test]
+fn ac7_list_and_update_reject_non_directory_and_dangling_directory_symlink() {
+    let temp = tempfile::tempdir().unwrap();
+    let non_directory_manager = manager(&temp);
+    fs::write(non_directory_manager.directory(), "not a directory").unwrap();
+    assert!(non_directory_manager.list().is_err());
+    assert!(non_directory_manager.update().is_err());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(&temp);
+        symlink(temp.path().join("missing-target"), manager.directory()).unwrap();
+        assert!(manager.list().is_err());
+        assert!(manager.update().is_err());
+    }
 }
 
 #[test]
