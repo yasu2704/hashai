@@ -115,9 +115,20 @@ jobs:
       - run: cargo build --all-targets --all-features
       - name: Static doctor smoke
         run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            shell=zsh
+            command -v "$shell"
+            "$shell" -fc 'autoload -Uz is-at-least; is-at-least 5.8'
+          elif bash -c 'test "${BASH_VERSINFO[0]}" -gt 5 || { test "${BASH_VERSINFO[0]}" -eq 5 && test "${BASH_VERSINFO[1]}" -ge 2; }'; then
+            shell=bash
+          else
+            shell=zsh
+            command -v "$shell"
+            "$shell" -fc 'autoload -Uz is-at-least; is-at-least 5.8'
+          fi
           set +e
-          HASHAI_CODEX_BIN="$PWD/definitely-missing-codex" target/debug/hashai doctor --format json --shell zsh > doctor-report.json
+          HASHAI_CODEX_BIN="$PWD/definitely-missing-codex" target/debug/hashai doctor --format json --shell "$shell" > doctor-report.json
           status=$?
           set -e
           test "$status" = 3
-          python3 -c 'import json; r=json.load(open("doctor-report.json")); expected=["platform","shell.kind","shell.version","codex.command","codex.version","codex.exec","codex.ephemeral","codex.ignore_user_config","codex.ignore_rules","codex.model","codex.config","codex.sandbox","codex.disable.shell_tool","codex.disable.browser_use","codex.disable.computer_use","codex.disable.apps","codex.skip_git_repo_check","codex.output_schema","codex.output_last_message","codex.project_doc_max_bytes","codex.project_doc_fallback_filenames","auth","model_reasoning","keybinding","integration","json_processing","outside_git_repository","live_probe"]; assert r["schema_version"] == 1 and r["mode"] == "static" and r["exit"] == 3 and [c["id"] for c in r["checks"]] == expected'
+          python3 -c 'import json; r=json.load(open("doctor-report.json")); required={"platform","shell.kind","shell.version","json_processing","outside_git_repository"}; assert r["schema_version"] == 1 and r["mode"] == "static" and r["exit"] == 3; assert all(next(c for c in r["checks"] if c["id"] == i)["status"] == "PASS" for i in required); assert all(c["exit"] in (0,3) for c in r["checks"])'

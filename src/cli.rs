@@ -24,7 +24,8 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
-    /// Make one isolated Codex probe; this may consume network, quota, and time.
+    /// Make one isolated Codex probe and load the selected shell's interactive startup files;
+    /// this may consume network, quota, time, and run arbitrary startup side effects.
     #[arg(long)]
     pub live: bool,
     /// Output format for the diagnostic report.
