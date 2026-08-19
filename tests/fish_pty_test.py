@@ -23,6 +23,10 @@ class MarkerTests(unittest.TestCase):
         setup = b"echo '__HASHAI_FISH_'READY__"
         self.assertNotIn(self.marker, setup)
 
+    def test_action_wrapper_echo_cannot_contain_complete_marker(self):
+        action = b"function done; echo '__HASHAI_FISH_'READY__; end"
+        self.assertNotIn(self.marker, action)
+
     def test_split_marker_command_emits_exact_marker(self):
         import subprocess
         command = "echo '__HASHAI_FISH_'READY__"
