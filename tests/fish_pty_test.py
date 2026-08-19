@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from fish_pty import marker_seen
+from fish_pty import marker_seen, terminal_responses
 
 class MarkerTests(unittest.TestCase):
     marker = b"__HASHAI_FISH_READY__"
@@ -33,3 +33,11 @@ class MarkerTests(unittest.TestCase):
     def test_selected_fish_binary_is_used(self):
         fish = os.environ["HASHAI_FISH_BIN"]
         self.assertIn("fish", pathlib.Path(fish).name)
+
+    def test_terminal_probe_replies_are_deterministic(self):
+        replies = terminal_responses(b"\x1b[c\x1b[?u\x1b]11;?\x1b\\\x1b[>q")
+        self.assertEqual(replies, [b"\x1b[?1;2c", b"\x1b[?0u", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1b[>0;0;0c"])
+
+    def test_terminal_replies_do_not_satisfy_marker(self):
+        data = b"".join(terminal_responses(b"\x1b[c"))
+        self.assertFalse(marker_seen(b"", data, self.marker)[0])
