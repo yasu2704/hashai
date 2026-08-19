@@ -24,7 +24,7 @@ find . -type f -size +1073741824c -print
 - ターミナルから離れずにコマンドを生成できるようにする。
 - Bash、Zsh、Fish で一貫した操作感を提供する。
 - LinuxとmacOSのコマンド差を考慮したコマンドを生成する。
-- Codex CLI の既存認証とモデル設定を再利用する。
+- Codex CLIの既存認証を再利用する。
 - AI が生成したコマンドを人間が確認してから実行する境界を維持する。
 
 ## 3. 非目標
@@ -128,7 +128,6 @@ Fish: commandline / bind ---------+         |
 - ZLE widgetとして実装する。
 - `BUFFER` から入力を取得し、結果を再設定する。
 - `CURSOR=${#BUFFER}` でカーソルを末尾へ移動する。
-- 明示的コマンドの結果を入力欄へ戻す用途では `print -z` も利用できる。
 
 ### 6.3 Fish
 
@@ -149,13 +148,14 @@ hashai integration generate fish
 
 生成済みファイルを各シェルの設定からsourceする。シェル起動のたびにCoreを起動して統合コードを生成する方式は、起動時間と障害範囲の面からデフォルトにしない。
 
-将来的には以下のプリセットを検討する。
+### 6.5 対応環境
 
-| プリセット | 内容 |
-|---|---|
-| `minimal` | 補完または明示的コマンドのみ |
-| `standard` | 明示的コマンドと短縮エイリアス |
-| `full` | 上記に加えて `Ctrl+G` キーバインド |
+- Linux: glibcを使用するx86_64およびaarch64環境。
+- macOS: macOS 13以降のIntel MacおよびApple Silicon Mac。
+- Bash: 4.0以降。macOS標準の古いBashではなく、Homebrewなどで導入した対応バージョンを使用する。
+- Zsh: 5.8以降。
+- Fish: 3.6以降。
+- Codex CLI: 固定の最低バージョン番号ではなく、hashaiが必要とするコマンドとフラグをすべて備えたバージョンを要求する。
 
 ## 7. Codex CLIとの連携
 
@@ -166,22 +166,36 @@ hashai integration generate fish
 ```bash
 codex exec - \
   --ephemeral \
+  --ignore-user-config \
+  --ignore-rules \
   --model gpt-5.6-luna \
   --config 'model_reasoning_effort="low"' \
+  --config 'project_doc_max_bytes=0' \
+  --config 'project_doc_fallback_filenames=[]' \
   --sandbox read-only \
+  --disable shell_tool \
+  --disable browser_use \
+  --disable computer_use \
+  --disable apps \
   --skip-git-repo-check \
   --output-schema /path/to/schema.json
 ```
 
 - `--ephemeral`: コマンド変換ごとのセッションを保存しない。
+- `--ignore-user-config`: Codexのユーザー設定、MCP、hooksなどを継承せず、認証だけを再利用する。
+- `--ignore-rules`: プロジェクトのexecpolicyルールを読み込まない。
 - `--model`: hashaiの設定で選択されたモデルをCodexへ明示する。
 - `--config model_reasoning_effort=...`: hashaiの設定で選択された推論強度をCodexへ明示する。
+- `--config project_doc_max_bytes=0` と `project_doc_fallback_filenames=[]`: `AGENTS.md` と代替プロジェクト文書をプロンプトへ混入させない。
 - `--sandbox read-only`: 生成処理中の書き込みを許可しない。
+- `--disable shell_tool`、`browser_use`、`computer_use`、`apps`: コマンド生成に不要なagent toolsを無効化する。
 - `--skip-git-repo-check`: Gitリポジトリ外でも利用可能にする。
 - `--output-schema`: 説明文やMarkdownが混ざらない構造化出力を要求する。
 - 自然言語は引数展開ではなく標準入力で渡し、クォート問題を減らす。
 
 実行時の作業ディレクトリは現在のディレクトリと一致させる。ただし、コマンド変換だけならCodexがディレクトリ内容を調査する必要はない。コンテキスト調査を許可するかは設定として分離する。
+
+Codex CLIはユーザー設定やプロジェクト文書を無効化しても、Codex固有の組み込みagent instructionsを送信する。このため、直接APIを呼び出す単純な変換器より入力トークン、クォータ消費、レイテンシが大きくなる可能性がある。hashaiはCodex CLIの既存認証を再利用する利点と引き換えに、この負担を受け入れる。
 
 ### 7.2 出力スキーマ
 
@@ -206,6 +220,8 @@ codex exec - \
 ```
 
 通常の入力バッファまたは標準出力には `command` だけを出力する。`risk` が `review` または `dangerous` の場合は、診断用の標準エラーへ一方向の警告を表示する。確認選択や説明などの専用対話UIは設けない。
+
+JSON SchemaはRustバイナリへ埋め込み、Codex実行時に排他的作成を使って権限 `0600` の一時ファイルへ書き出す。成功、失敗、キャンセルのいずれでもRAIIにより削除する。既存ファイルや予測可能な固定パスを再利用しない。
 
 ### 7.3 プロンプト方針
 
@@ -293,6 +309,7 @@ eval "$(hashai generate '不要ファイルを消して')"
 
 - Codexが見つからない場合は、インストール確認方法を表示する。
 - 未認証の場合は、Codexのログイン方法を案内する。
+- 設定されたモデルまたは推論強度を利用できない場合は、自動的に別の値へフォールバックせず、設定変更を案内する。
 - タイムアウト時は元の入力バッファを保持する。
 - `Ctrl+C` でCodex子プロセスを終了できるようにする。
 - 空または不正な構造化出力を入力バッファへ挿入しない。
@@ -310,8 +327,6 @@ keybinding = "ctrl-g"
 shell = "auto"
 timeout_seconds = 30
 context = "minimal"
-show_risk = true
-
 [codex]
 model = "gpt-5.6-luna"
 reasoning_effort = "low"
@@ -320,7 +335,7 @@ reasoning_effort = "low"
 extra_instructions = "Prefer rg over grep when available."
 ```
 
-優先順位は、CLI引数、環境変数、プロジェクト設定、ユーザー設定、組み込みデフォルトの順を候補とする。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
+優先順位は、CLI引数、環境変数、ユーザー設定、組み込みデフォルトの順とする。初期リリースでは未信頼リポジトリから挙動を変更されないよう、プロジェクト設定を読み込まない。`prompt.extra_instructions` はユーザー設定でのみ指定できる。`review` と `dangerous` の警告は無効化できない。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
 
 ## 13. CLI案
 
@@ -346,7 +361,9 @@ hashai doctor
 `hashai doctor` は少なくとも以下を確認する。
 
 - Codex CLIの存在とバージョン
+- `exec`、`--ephemeral`、`--ignore-user-config`、`--ignore-rules`、`--output-schema`、`--sandbox`、必要な `--disable` 対象とプロジェクト文書無効化設定の有無
 - Codexの認証状態
+- 設定されたモデルと推論強度が利用可能か
 - 対象シェルとバージョン
 - キーバインド競合
 - 統合ファイルのバージョン不一致
@@ -361,6 +378,12 @@ hashai doctor
 - `??` エイリアスと `Ctrl+G` の併用。
 - 非対話モードとJSON出力。
 - シェル起動時の負荷を避ける静的統合ファイル。
+- Codexをread-only sandboxで起動し、shell、browser、computer、appsのagent toolsを無効化する方式。
+
+### Scout
+
+- Codexの `--ignore-user-config` と `--ignore-rules` を使用し、対話エージェント向けの設定、MCP、hooks、プロジェクトルールを継承しない方式。
+- `--ephemeral`、read-only sandbox、標準入力、出力用一時ファイルを組み合わせる方式。
 
 ### ShellGPT
 
@@ -420,6 +443,7 @@ hashai doctor
 
 - Coreの単体テストではCodexプロセスを差し替え、正常、空出力、不正JSON、タイムアウト、キャンセルを検証する。
 - Bash、Zsh、Fishごとに入力バッファ取得・置換を統合テストする。
+- Linux/macOSとBash/Zsh/Fishを組み合わせた6環境のテストマトリクスを用意する。
 - 空白、引用符、改行、日本語、絵文字を含む入力を検証する。
 - 危険なコマンドが自動実行されないことをテストする。
 - Gitリポジトリ内外の双方で動作を検証する。
@@ -449,6 +473,9 @@ hashai doctor
 - 初期サポート対象はLinuxとmacOSとする。LinuxではGNU coreutils・findutils、macOSでは標準BSD系コマンドを基準とする。
 - OS、バージョン、利用可能な主要コマンドの情報をCodexへ渡し、GNU/BSD差を考慮したコマンドを生成させる。hashai自身にはGNUコマンドとBSDコマンドを相互変換する層を実装しない。
 - Windows、その他のBSD、BusyBoxは初期サポート対象外とする。
+- Codexのユーザー設定、プロジェクトルール、`AGENTS.md`、代替プロジェクト文書は継承せず、既存認証だけを再利用する。shell、browser、computer、appsのagent toolsを明示的に無効化する。
+- プロジェクト設定は読み込まず、CLI引数、環境変数、ユーザー設定、組み込みデフォルトだけを使用する。危険度警告は無効化できない。
+- 設定されたモデルまたは推論強度が利用できない場合は自動フォールバックせず、元の入力バッファを保持して設定変更を案内する。
 
 初期判断としては、Rust製の単一バイナリ、single-turn、`Ctrl+G`、Codex CLIの既存認証を優先する。生成結果は自動実行せず、シェル統合では入力バッファへ挿入し、明示的CLIでは標準出力へ表示する。
 
@@ -457,6 +484,7 @@ hashai doctor
 - [OpenAI: Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 - [OpenAI: Codex developer commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli)
 - [Deltik/shell-ai](https://github.com/Deltik/shell-ai)
+- [tomnagengast/scout](https://github.com/tomnagengast/scout)
 - [TheR1D/shell_gpt](https://github.com/TheR1D/shell_gpt)
 - [Warp AI](https://www.warp.dev/warp-ai)
 - [Warp command entry](https://docs.warp.dev/terminal/entry)
