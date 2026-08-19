@@ -113,3 +113,22 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
       - run: cargo build --all-targets --all-features
+      - name: Static doctor smoke
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            shell=zsh
+            command -v "$shell"
+            "$shell" -fc 'autoload -Uz is-at-least; is-at-least 5.8'
+          elif bash -c 'test "${BASH_VERSINFO[0]}" -gt 5 || { test "${BASH_VERSINFO[0]}" -eq 5 && test "${BASH_VERSINFO[1]}" -ge 2; }'; then
+            shell=bash
+          else
+            shell=zsh
+            command -v "$shell"
+            "$shell" -fc 'autoload -Uz is-at-least; is-at-least 5.8'
+          fi
+          set +e
+          HASHAI_CODEX_BIN="$PWD/definitely-missing-codex" target/debug/hashai doctor --format json --shell "$shell" > doctor-report.json
+          status=$?
+          set -e
+          test "$status" = 3
+          python3 -c 'import json; r=json.load(open("doctor-report.json")); required={"platform","shell.kind","shell.version","json_processing","outside_git_repository"}; assert r["schema_version"] == 1 and r["mode"] == "static" and r["exit"] == 3; assert all(next(c for c in r["checks"] if c["id"] == i)["status"] == "PASS" for i in required); assert all(c["exit"] in (0,3) for c in r["checks"])'

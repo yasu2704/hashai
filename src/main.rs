@@ -8,7 +8,7 @@ use std::{
 use clap::{Parser, error::ErrorKind};
 use hashai::{
     HashaiError,
-    cli::{Cli, Command, ConfigCommand, IntegrationCommand, IntegrationOverrideArgs},
+    cli::{Cli, Command, ConfigCommand, DoctorArgs, IntegrationCommand, IntegrationOverrideArgs},
     config::{ConfigOverrides, ConfigSources},
     integration::{IntegrationManager, WriteOutcome},
     platform,
@@ -22,6 +22,7 @@ fn main() -> ProcessExitCode {
     let _ = ctrlc::set_handler(|| CANCELLED.store(true, Ordering::SeqCst));
     match run() {
         Ok(()) => ProcessExitCode::SUCCESS,
+        Err(HashaiError::Diagnostic(exit_code)) => ProcessExitCode::from(exit_code as u8),
         Err(error) => {
             eprintln!("hashai: {error}");
             ProcessExitCode::from(error.exit_code() as u8)
@@ -49,6 +50,48 @@ fn run() -> Result<(), HashaiError> {
         Command::Config(args) => match args.command {
             ConfigCommand::Show(args) => run_config_show(args),
         },
+        Command::Doctor(args) => run_doctor(args),
+    }
+}
+
+fn run_doctor(args: DoctorArgs) -> Result<(), HashaiError> {
+    if !matches!(args.format.as_str(), "human" | "json") {
+        return Err(HashaiError::ArgumentOrConfig(
+            "doctor format must be human or json".to_owned(),
+        ));
+    }
+    let config = ConfigSources::from_system(ConfigOverrides::default())?;
+    let report = hashai::doctor::run(
+        &config,
+        args.shell.as_deref(),
+        args.live,
+        &detected_environment().os,
+        &CANCELLED,
+    );
+    if args.format == "json" {
+        println!(
+            "{}",
+            serde_json::to_string(&report).expect("doctor report is serializable")
+        );
+    } else {
+        for check in &report.checks {
+            println!(
+                "{:4} {:32} {}",
+                check.status.as_str(),
+                check.id,
+                check.message
+            );
+        }
+        println!(
+            "overall: {} (exit {})",
+            report.overall.as_str(),
+            report.exit
+        );
+    }
+    if report.exit == 0 {
+        Ok(())
+    } else {
+        Err(HashaiError::Diagnostic(report.exit))
     }
 }
 

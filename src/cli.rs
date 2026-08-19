@@ -18,6 +18,22 @@ pub enum Command {
     Integration(IntegrationArgs),
     /// Show the resolved non-secret configuration.
     Config(ConfigArgs),
+    /// Diagnose local hashai, shell, and Codex CLI readiness.
+    Doctor(DoctorArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Make one isolated Codex probe and load the selected shell's interactive startup files;
+    /// this may consume network, quota, time, and run arbitrary startup side effects.
+    #[arg(long)]
+    pub live: bool,
+    /// Output format for the diagnostic report.
+    #[arg(long, default_value = "human")]
+    pub format: String,
+    /// Shell to diagnose: bash, zsh, or fish.
+    #[arg(long)]
+    pub shell: Option<String>,
 }
 
 #[derive(Debug, Args)]

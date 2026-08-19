@@ -383,6 +383,8 @@ hashai doctor
 
 `hashai doctor` は少なくとも以下を確認する。
 
+`--live` はCodexへのprobeに加え、選択したshellをinteractive modeで起動してユーザーのstartup configurationを読み、artifactをsourceしてkeybindingを確認する。このためnetwork、quota、latencyだけでなくstartup hookによる任意の副作用を起こしうる。既定のstatic診断はこれらを実行しない。
+
 - Codex CLIの存在とバージョン
 - `exec`、`--ephemeral`、`--ignore-user-config`、`--ignore-rules`、`--output-schema`、`--sandbox`、必要な `--disable` 対象とプロジェクト文書無効化設定の有無
 - Codexの認証状態
