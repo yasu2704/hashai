@@ -56,14 +56,16 @@ fn fake_publication_replaces_an_executing_script_via_closed_staging_file() {
     let temp = TempDir::new().unwrap();
     let executable = temp.path().join("fake-codex");
     let started = temp.path().join("started");
+    let initial_staging = temp.path().join(".fake-codex-initial-staging");
     fs::write(
-        &executable,
+        &initial_staging,
         format!("#!/bin/sh\nprintf x > {}\nsleep 2\n", started.display()),
     )
     .unwrap();
-    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    let mut permissions = fs::metadata(&initial_staging).unwrap().permissions();
     permissions.set_mode(0o700);
-    fs::set_permissions(&executable, permissions).unwrap();
+    fs::set_permissions(&initial_staging, permissions).unwrap();
+    fs::rename(&initial_staging, &executable).unwrap();
     let mut running = Command::new(&executable).spawn().unwrap();
     wait_for_file(&started, "executing fake marker");
 
@@ -294,7 +296,10 @@ fn ac5_unclassified_process_failure_reports_status_and_artifact_sizes() {
         .run(request(fake(&temp, &body), &temp), &AtomicBool::new(false))
         .unwrap_err();
     assert_eq!(error.exit_code(), ExitCode::General as i32);
-    assert!(error.to_string().contains("exit status: 9"));
+    assert!(
+        error.to_string().contains("exit status: 9"),
+        "unexpected unclassified error: {error}"
+    );
     assert!(error.to_string().contains("stderr bytes: 5"));
     assert!(error.to_string().contains("output-file bytes: 1"));
 }

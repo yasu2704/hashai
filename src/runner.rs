@@ -3,11 +3,16 @@ use std::{
     io::Write,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
-    process::{Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+type TestSpawnHook = Arc<dyn Fn(&mut Command) -> std::io::Result<Child> + Send + Sync>;
 
 use serde::Deserialize;
 use tempfile::NamedTempFile;
@@ -23,6 +28,7 @@ const OUTPUT_SCHEMA: &str = r#"{
   "required": ["command", "risk"],
   "additionalProperties": false
 }"#;
+const EXECUTABLE_BUSY_RETRY_WINDOW: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct RunRequest {
@@ -57,11 +63,21 @@ pub struct Generation {
 }
 
 #[derive(Default)]
-pub struct CodexRunner;
+pub struct CodexRunner {
+    #[cfg(test)]
+    spawn_hook: Option<TestSpawnHook>,
+}
 
 impl CodexRunner {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    #[cfg(test)]
+    fn with_test_spawn(spawn_hook: TestSpawnHook) -> Self {
+        Self {
+            spawn_hook: Some(spawn_hook),
+        }
     }
 
     pub fn run(
@@ -120,19 +136,23 @@ impl CodexRunner {
             });
         }
 
-        let mut child = command.spawn().map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => HashaiError::CodexNotFound(format!(
-                "Codex CLI was not found at {}; install Codex CLI and run `codex login`",
-                request.executable.display()
-            )),
-            _ => HashaiError::Io(std::io::Error::new(
-                error.kind(),
-                format!(
-                    "failed to start Codex CLI at {}: {error}",
+        let mut child =
+            retry_executable_busy(Instant::now() + EXECUTABLE_BUSY_RETRY_WINDOW, || {
+                self.spawn(&mut command)
+            })
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::NotFound => HashaiError::CodexNotFound(format!(
+                    "Codex CLI was not found at {}; install Codex CLI and run `codex login`",
                     request.executable.display()
-                ),
-            )),
-        })?;
+                )),
+                _ => HashaiError::Io(std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "failed to start Codex CLI at {}: {error}",
+                        request.executable.display()
+                    ),
+                )),
+            })?;
         if let Some(mut stdin) = child.stdin.take()
             && let Err(error) = stdin.write_all(request.prompt.as_bytes())
         {
@@ -168,12 +188,37 @@ impl CodexRunner {
         }
         parse_generation(&fs::read_to_string(output.path())?)
     }
+
+    fn spawn(&self, command: &mut Command) -> std::io::Result<Child> {
+        #[cfg(test)]
+        if let Some(spawn_hook) = &self.spawn_hook {
+            return spawn_hook(command);
+        }
+        command.spawn()
+    }
 }
 
 fn private_temp_file() -> Result<NamedTempFile, HashaiError> {
     let file = NamedTempFile::new()?;
     fs::set_permissions(file.path(), fs::Permissions::from_mode(0o600))?;
     Ok(file)
+}
+
+fn retry_executable_busy<T>(
+    deadline: Instant,
+    mut operation: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if error.raw_os_error() == Some(libc::ETXTBSY) && Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn terminate_process_group(child: &mut std::process::Child) -> Result<(), HashaiError> {
@@ -338,5 +383,70 @@ fn classify_stderr(stderr: &[u8], status: &ExitStatus, output_bytes: usize) -> H
             "Codex CLI failed with {status}; stderr bytes: {}; output-file bytes: {output_bytes}",
             stderr.len()
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ExitCode;
+
+    #[test]
+    fn run_retries_busy_spawn_but_not_other_io_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("codex-success");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nout=''; while [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done; cat >/dev/null; printf '%s' '{\"command\":\"printf ok\",\"risk\":\"safe\"}' > \"$out\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let request = |executable| RunRequest {
+            executable,
+            prompt: "test".to_owned(),
+            current_dir: temp.path().to_path_buf(),
+            codex: CodexConfig::default(),
+            timeout: Duration::from_secs(1),
+        };
+
+        let busy_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let busy_hook_attempts = Arc::clone(&busy_attempts);
+        let generation = CodexRunner::with_test_spawn(Arc::new(move |command| {
+            if busy_hook_attempts.fetch_add(1, Ordering::SeqCst) < 2 {
+                Err(std::io::Error::from_raw_os_error(libc::ETXTBSY))
+            } else {
+                command.spawn()
+            }
+        }))
+        .run(request(executable.clone()), &AtomicBool::new(false))
+        .unwrap();
+        assert_eq!(generation.command, "printf ok");
+        assert_eq!(busy_attempts.load(Ordering::SeqCst), 3);
+
+        let deadline_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let deadline_hook_attempts = Arc::clone(&deadline_attempts);
+        let deadline_error = CodexRunner::with_test_spawn(Arc::new(move |_| {
+            deadline_hook_attempts.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::from_raw_os_error(libc::ETXTBSY))
+        }))
+        .run(request(executable.clone()), &AtomicBool::new(false))
+        .unwrap_err();
+        assert_eq!(deadline_error.exit_code(), ExitCode::General as i32);
+        assert!(deadline_attempts.load(Ordering::SeqCst) > 1);
+        assert!(deadline_error.to_string().contains("Text file busy"));
+
+        let nonbusy_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let nonbusy_hook_attempts = Arc::clone(&nonbusy_attempts);
+        let nonbusy_error = CodexRunner::with_test_spawn(Arc::new(move |_| {
+            nonbusy_hook_attempts.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "no",
+            ))
+        }))
+        .run(request(executable), &AtomicBool::new(false))
+        .unwrap_err();
+        assert_eq!(nonbusy_error.exit_code(), ExitCode::General as i32);
+        assert_eq!(nonbusy_attempts.load(Ordering::SeqCst), 1);
     }
 }
