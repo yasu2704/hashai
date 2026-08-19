@@ -35,6 +35,8 @@ fn ac2_generate_parses_every_supported_shell() {
 fn ac3_precedence_is_cli_then_environment_then_user_config_then_defaults() {
     let user = Config {
         trigger: ",,".to_owned(),
+        trigger_enabled: true,
+        keybinding: hashai::config::Keybinding::CtrlG,
         timeout_seconds: 11,
         shell: Shell::Zsh,
         codex: hashai::config::CodexConfig {
@@ -60,6 +62,8 @@ fn ac3_precedence_is_cli_then_environment_then_user_config_then_defaults() {
     ]);
     let cli = ConfigOverrides {
         trigger: Some("# ".to_owned()),
+        trigger_enabled: None,
+        keybinding: None,
         timeout_seconds: Some(33),
         shell: Some("bash".to_owned()),
         model: Some("cli-model".to_owned()),
@@ -277,6 +281,8 @@ fn ac7_empty_requests_and_unknown_shells_are_argument_errors() {
 fn user_config() -> Config {
     Config {
         trigger: ",,".to_owned(),
+        trigger_enabled: true,
+        keybinding: hashai::config::Keybinding::CtrlG,
         timeout_seconds: 11,
         shell: Shell::Zsh,
         codex: hashai::config::CodexConfig {

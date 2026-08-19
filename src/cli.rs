@@ -16,6 +16,8 @@ pub enum Command {
     Generate(GenerateArgs),
     /// Create and manage static shell integration artifacts.
     Integration(IntegrationArgs),
+    /// Show the resolved non-secret configuration.
+    Config(ConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -47,17 +49,48 @@ pub enum IntegrationCommand {
     /// Generate a managed integration artifact for one shell.
     Generate(IntegrationGenerateArgs),
     /// Update every installed managed integration artifact.
-    Update,
+    Update(IntegrationOverrideArgs),
     /// List installed managed integration artifacts without modifying them.
     List,
 }
 
 #[derive(Debug, Args)]
 pub struct IntegrationGenerateArgs {
+    #[command(flatten)]
+    pub overrides: IntegrationOverrideArgs,
     /// Shell to generate: bash, zsh, or fish.
     #[arg(long, required_unless_present = "shell_positional")]
     pub shell: Option<String>,
     /// Backwards-compatible positional form shown in the design document.
     #[arg(value_name = "SHELL", conflicts_with = "shell")]
     pub shell_positional: Option<String>,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct IntegrationOverrideArgs {
+    #[arg(long)]
+    pub trigger: Option<String>,
+    #[arg(long)]
+    pub keybinding: Option<String>,
+    #[arg(long, conflicts_with = "trigger")]
+    pub disable_trigger: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    Show(ConfigShowArgs),
+}
+#[derive(Debug, Args, Default)]
+pub struct ConfigShowArgs {
+    #[arg(long)]
+    pub trigger: Option<String>,
+    #[arg(long)]
+    pub keybinding: Option<String>,
+    #[arg(long, conflicts_with = "trigger")]
+    pub disable_trigger: bool,
 }

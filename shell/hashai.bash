@@ -4,7 +4,7 @@
 # the user invokes the Readline binding.
 
 __hashai_bash_replace_line() {
-    local trigger=${HASHAI_TRIGGER:-'# '}
+    local trigger=${HASHAI_TRIGGER:-{{TRIGGER}}}
     local request command output
 
     # bind -x is meaningful only for an interactive terminal. In particular,
@@ -49,7 +49,8 @@ __hashai_bash_replace_line() {
 __hashai_bash_install_binding() {
     # Keep this renderer-local seam separate from the public configuration
     # surface until a keybinding setting is specified.
-    local keybinding='\C-g'
+    local keybinding='{{KEYBINDING}}'
+    [[ {{ENABLED}} == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
     [[ -t 0 && -t 1 && -t 2 ]] || return 0
     bind -x "\"${keybinding}\":__hashai_bash_replace_line"
 }

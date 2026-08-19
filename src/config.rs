@@ -6,6 +6,8 @@ use serde::Deserialize;
 use crate::HashaiError;
 
 const ENV_TRIGGER: &str = "HASHAI_TRIGGER";
+const ENV_TRIGGER_ENABLED: &str = "HASHAI_TRIGGER_ENABLED";
+const ENV_KEYBINDING: &str = "HASHAI_KEYBINDING";
 const ENV_TIMEOUT_SECONDS: &str = "HASHAI_TIMEOUT_SECONDS";
 const ENV_SHELL: &str = "HASHAI_SHELL";
 const ENV_CODEX_MODEL: &str = "HASHAI_CODEX_MODEL";
@@ -59,6 +61,8 @@ impl Shell {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub trigger: String,
+    pub trigger_enabled: bool,
+    pub keybinding: Keybinding,
     pub timeout_seconds: u64,
     pub shell: Shell,
     pub codex: CodexConfig,
@@ -69,10 +73,37 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             trigger: "# ".to_owned(),
+            trigger_enabled: true,
+            keybinding: Keybinding::CtrlG,
             timeout_seconds: 30,
             shell: Shell::Auto,
             codex: CodexConfig::default(),
             prompt: PromptConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Keybinding {
+    #[default]
+    CtrlG,
+    CtrlX,
+}
+impl Keybinding {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CtrlG => "ctrl-g",
+            Self::CtrlX => "ctrl-x",
+        }
+    }
+    pub fn parse(value: &str) -> Result<Self, HashaiError> {
+        match value {
+            "ctrl-g" => Ok(Self::CtrlG),
+            "ctrl-x" => Ok(Self::CtrlX),
+            _ => Err(HashaiError::ArgumentOrConfig(format!(
+                "unsupported keybinding `{value}`; expected ctrl-g or ctrl-x"
+            ))),
         }
     }
 }
@@ -103,6 +134,8 @@ pub struct PromptConfig {
 #[derive(Clone, Debug, Default)]
 pub struct ConfigOverrides {
     pub trigger: Option<String>,
+    pub trigger_enabled: Option<bool>,
+    pub keybinding: Option<String>,
     pub timeout_seconds: Option<u64>,
     pub shell: Option<String>,
     pub model: Option<String>,
@@ -123,6 +156,12 @@ impl ConfigSources {
         if let Some(value) = environment.get(ENV_TRIGGER) {
             resolved.trigger = value.clone();
         }
+        if let Some(value) = environment.get(ENV_TRIGGER_ENABLED) {
+            resolved.trigger_enabled = parse_bool(ENV_TRIGGER_ENABLED, value)?;
+        }
+        if let Some(value) = environment.get(ENV_KEYBINDING) {
+            resolved.keybinding = Keybinding::parse(value)?;
+        }
         if let Some(value) = environment.get(ENV_TIMEOUT_SECONDS) {
             resolved.timeout_seconds = value.parse().map_err(|_| {
                 HashaiError::ArgumentOrConfig(format!("{ENV_TIMEOUT_SECONDS} must be an integer"))
@@ -140,6 +179,12 @@ impl ConfigSources {
 
         if let Some(value) = cli.trigger {
             resolved.trigger = value;
+        }
+        if let Some(value) = cli.trigger_enabled {
+            resolved.trigger_enabled = value;
+        }
+        if let Some(value) = cli.keybinding {
+            resolved.keybinding = Keybinding::parse(&value)?;
         }
         if let Some(value) = cli.timeout_seconds {
             resolved.timeout_seconds = value;
@@ -170,6 +215,8 @@ fn relevant_environment() -> Result<BTreeMap<String, String>, HashaiError> {
     let mut environment = BTreeMap::new();
     for name in [
         ENV_TRIGGER,
+        ENV_TRIGGER_ENABLED,
+        ENV_KEYBINDING,
         ENV_TIMEOUT_SECONDS,
         ENV_SHELL,
         ENV_CODEX_MODEL,
@@ -184,6 +231,16 @@ fn relevant_environment() -> Result<BTreeMap<String, String>, HashaiError> {
         environment.insert(name.to_owned(), value);
     }
     Ok(environment)
+}
+
+fn parse_bool(name: &str, value: &str) -> Result<bool, HashaiError> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(HashaiError::ArgumentOrConfig(format!(
+            "{name} must be exactly true or false"
+        ))),
+    }
 }
 
 pub fn user_config_path() -> Result<PathBuf, HashaiError> {
@@ -209,9 +266,19 @@ fn load_user_config() -> Result<Option<Config>, HashaiError> {
 }
 
 fn validate(config: &Config) -> Result<(), HashaiError> {
-    if config.trigger.is_empty() {
+    let bytes = config.trigger.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 64
+        || bytes.iter().any(|byte| {
+            *byte == b'\r'
+                || *byte == b'\n'
+                || *byte == 0
+                || (*byte < 0x20 && *byte != b'\t')
+                || *byte == 0x7f
+        })
+    {
         return Err(HashaiError::ArgumentOrConfig(
-            "trigger must not be empty".to_owned(),
+            "trigger must be 1..64 bytes and contain no control characters except tab".to_owned(),
         ));
     }
     if config.timeout_seconds == 0 {

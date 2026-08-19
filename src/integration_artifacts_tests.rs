@@ -4,13 +4,51 @@ use std::{
 };
 
 use crate::{
-    config::Shell,
+    config::{Config, Keybinding, Shell},
     integration::{ARTIFACT_VERSION, IntegrationManager, UpdateSummary, WriteOutcome},
 };
 use fs2::FileExt;
 
 fn manager(temp: &tempfile::TempDir) -> IntegrationManager {
     IntegrationManager::new(temp.path().join("managed-integrations"))
+}
+
+#[test]
+fn ac3_ac4_ac6_artifacts_bake_safe_editor_settings_for_every_shell() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    let config = Config {
+        trigger: "`$; '\\ \t".into(),
+        keybinding: Keybinding::CtrlX,
+        ..Config::default()
+    };
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager
+            .generate_with_config(shell.clone(), &config)
+            .unwrap();
+        let artifact = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert!(artifact.contains("\\C-x") || artifact.contains("^X") || artifact.contains("\\cx"));
+        assert!(artifact.contains("HASHAI_TRIGGER")); // compatible enabled runtime override
+        assert!(!artifact.contains("HASHAI_KEYBINDING"));
+        assert!(!artifact.contains("eval"));
+    }
+}
+
+#[test]
+fn ac3_disabled_artifact_registers_no_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    let config = Config {
+        trigger_enabled: false,
+        ..Config::default()
+    };
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager
+            .generate_with_config(shell.clone(), &config)
+            .unwrap();
+        let artifact = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert!(artifact.contains("[[ 0 == 1") || artifact.contains("test 0 = 1"));
+    }
 }
 
 #[test]

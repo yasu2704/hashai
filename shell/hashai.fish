@@ -2,7 +2,7 @@
 
 function __hashai_fish_replace_buffer
     test "$__hashai_fish_enabled" = 1; or return 0
-    set -l trigger '# '
+    set -l trigger {{TRIGGER}}
     if set -q HASHAI_TRIGGER
         set trigger $HASHAI_TRIGGER
     end
@@ -33,8 +33,9 @@ end
 function __hashai_fish_install_binding
     status is-interactive; or return 0
     test -t 0; and test -t 1; and test -t 2; or return 0
-    bind --mode default \cg __hashai_fish_replace_buffer
-    bind --mode insert \cg __hashai_fish_replace_buffer
+    test {{ENABLED}} = 1; and test "$HASHAI_TRIGGER_ENABLED" != false; or return 0
+    bind --mode default {{KEYBINDING}} __hashai_fish_replace_buffer
+    bind --mode insert {{KEYBINDING}} __hashai_fish_replace_buffer
     set -g __hashai_fish_enabled 1
 end
 
