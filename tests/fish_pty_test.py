@@ -46,6 +46,13 @@ class MarkerTests(unittest.TestCase):
             actual = responder.responses(stream[:point]) + responder.responses(stream[point:])
             self.assertEqual(actual, [b"\x1b[?1;2c", b"\x1bP0+r696e646e\x1b\\"])
 
+    def test_second_probe_wave_and_cpr_reply(self):
+        responder = ProbeResponder()
+        first = responder.responses(b"\x1b[0c\x1b]11;?")
+        second = responder.responses(b"\x1b]11;?\x1b[6n\x1b[0c")
+        self.assertEqual(first, [b"\x1b[?1;2c", b"\x1b]11;rgb:0000/0000/0000\x1b\\"])
+        self.assertEqual(second, [b"\x1b[?1;2c", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1b[1;1R"])
+
     def test_terminal_replies_do_not_satisfy_marker(self):
         data = b"".join(terminal_responses(b"\x1b[c"))
         self.assertFalse(marker_seen(b"", data, self.marker)[0])
