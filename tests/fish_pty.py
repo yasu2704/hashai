@@ -42,7 +42,7 @@ def terminal_responses(data):
     """Compatibility helper for unit callers with one complete chunk."""
     return ProbeResponder().responses(data)
 
-def write_all(fd, data):
+def write_all(fd, data, responder=None, pending=None):
     deadline = time.monotonic() + 10
     while data:
         try:
@@ -51,15 +51,27 @@ def write_all(fd, data):
             continue
         except BlockingIOError as error:
             if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK): raise
-            if time.monotonic() >= deadline or not select.select([], [fd], [], .1)[1]:
-                if time.monotonic() >= deadline: raise RuntimeError("PTY did not become writable")
+            readable, writable, _ = select.select([fd], [fd], [], .1)
+            if readable:
+                output = os.read(fd, 4096)
+                if pending is not None: pending.extend(output)
+                sys.stdout.buffer.write(output); sys.stdout.buffer.flush()
+                if responder:
+                    for reply in responder.responses(output): write_all(fd, reply, pending=pending)
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"PTY did not become writable with {len(data)} bytes pending")
+            if not writable:
                 continue
             continue
         data = data[count:]
 
-def wait_marker(fd, marker, responder):
+def wait_marker(fd, marker, responder, pending):
     tail = b""; deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
+        if pending:
+            data = bytes(pending); pending.clear()
+            seen, tail = marker_seen(tail, data, marker)
+            if seen: return
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096)
             for reply in responder.responses(data): write_all(fd, reply)
@@ -78,6 +90,7 @@ def main():
     groups = open(sys.argv[1], "rb").read().split(b"\0")
     master, slave = pty.openpty()
     responder = ProbeResponder()
+    pending = bytearray()
     def controlling_tty():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
@@ -85,8 +98,8 @@ def main():
     os.close(slave); os.set_blocking(master, False)
     try:
         for index, group in enumerate(groups):
-            write_all(master, group)
-            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder)
+            write_all(master, group, responder, pending)
+            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending)
         deadline=time.monotonic()+10
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
