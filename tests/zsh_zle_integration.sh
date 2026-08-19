@@ -234,7 +234,8 @@ assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
 
 # AC-8: structural success and failure mutations are caught by the same oracles.
 mutated="$test_dir/hashai.mutated.zsh"
-sed 's/BUFFER=$command/BUFFER=corrupted/' "$artifact" >"$mutated"
+sed 's/BUFFER=$generated/BUFFER=corrupted/' "$artifact" >"$mutated"
+grep -F 'BUFFER=corrupted' "$mutated" >/dev/null
 run_tty "$mutated" success "$original" 5 e '# '
 if cmp -s "$test_dir/expected-success-buffer" "$TTY_BUFFER"; then
     printf 'success-path mutation was not detected\n' >&2

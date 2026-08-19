@@ -5,8 +5,6 @@
 
 __hashai_zsh_replace_buffer() {
     emulate -L zsh
-    # ZLE gives the widget its own output plumbing. Disable multio's helper so
-    # Core's redirected record is complete before this widget reads it.
     local trigger=${HASHAI_TRIGGER:-'# '}
     local request output generated
 
