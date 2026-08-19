@@ -30,4 +30,16 @@ run noauto "$original" 5 default; test ! -e "$d/auto"
 run success 'echo untouched' 3 default; printf '%s' 'echo untouched' >"$d/expected"; cmp "$d/expected" "$d/buffer"; test ! -s "$d/request"
 for mode in failure timeout cancel empty malformed; do run "$mode" "$original" 5 default; printf '%s' "$original" >"$d/expected"; cmp "$d/expected" "$d/buffer"; cmp <(printf '5\n') "$d/cursor"; [[ $mode == empty || $mode == malformed ]] || grep -F 'command generation failed' "$d/log"; done
 run success ',, 日本語 😀' 2 default ',, '; printf '%s' "printf '日本語 😀  spaced'" >"$d/expected"; cmp "$d/expected" "$d/buffer"
+# AC-5: sourcing noninteractive or interactive-without-a-TTY never invokes Core.
+: >"$d/request"
+PATH="$d/bin:$PATH" HASHAI_REQUEST_FILE="$d/request" "$HASHAI_FISH_BIN" --no-config -c "source '$a'"
+test ! -s "$d/request"
+mutated="$d/hashai.success-mutated.fish"
+sed 's/commandline --replace -- "\$generated"/commandline --replace -- corrupted/' "$a" >"$mutated"
+test "$(grep -Fc 'commandline --replace -- corrupted' "$mutated")" -eq 1
+run success "$original" 5 default '# ' "$mutated"; printf '%s' "printf '日本語 😀  spaced'" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'success mutation was not detected\n' >&2; exit 1; fi
+failure_mutated="$d/hashai.failure-mutated.fish"
+sed "s/echo 'hashai: command generation failed; input preserved' >&2/commandline --replace -- corrupted; commandline --cursor 0; echo 'hashai: command generation failed; input preserved' >&2/" "$a" >"$failure_mutated"
+test "$(grep -Fc 'commandline --replace -- corrupted; commandline --cursor 0' "$failure_mutated")" -eq 1
+run failure "$original" 5 default '# ' "$failure_mutated"; printf '%s' "$original" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'failure mutation was not detected\n' >&2; exit 1; fi
 printf 'Fish commandline PTY integration checks passed.\n'
