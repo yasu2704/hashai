@@ -24,8 +24,10 @@ printf '%s' "$HASHAI_CONTRACT_REQUEST" >"$canonical_request"
 export XDG_DATA_HOME="$test_dir/data"
 "$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
-# shellcheck disable=SC1003,SC2016 # literal quote/substitution corpus values
-injection_marker="$test_dir/trigger-injection"
+injection_marker="/tmp/hashai-trigger-injection-$$"
+rm -f "$injection_marker"
+trap 'rm -rf "$test_dir"; rm -f "$injection_marker"' EXIT
+# shellcheck disable=SC1003 # literal quote/substitution corpus values
 for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
     "$HASHAI_BIN" integration generate --shell zsh --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_ZSH_BIN" -n "$artifact"

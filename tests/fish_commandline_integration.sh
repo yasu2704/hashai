@@ -5,8 +5,10 @@ source tests/shell_contract_cases.sh
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data"
 "$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
-# shellcheck disable=SC1003,SC2016 # literal quote/substitution corpus values
-injection_marker="$d/trigger-injection"
+injection_marker="/tmp/hashai-trigger-injection-$$"
+rm -f "$injection_marker"
+trap 'rm -rf "$d"; rm -f "$injection_marker"' EXIT
+# shellcheck disable=SC1003 # literal quote/substitution corpus values
 for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
     "$HASHAI_BIN" integration generate --shell fish --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_FISH_BIN" -n "$a"
