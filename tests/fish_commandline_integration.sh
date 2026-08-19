@@ -19,10 +19,11 @@ function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer 
 function __fish_capture; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\cx __fish_capture
 bind -M insert \\cx __fish_capture
-bind \\cy edit_command_buffer
+function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
+bind \\cy __fish_edit_buffer
 echo '__HASHAI_FISH_'READY__
 EOF
-if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\007\0\030' >>"$d/cmd"; else printf '%s%s\007\0\030' "$b" "$moves" >>"$d/cmd"; fi
+if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\0\007\0\030' >>"$d/cmd"; else printf '%s%s\007\0\030' "$b" "$moves" >>"$d/cmd"; fi
 if ! PATH="$d/bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_TRIGGER="$trigger" HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 tests/fish_pty.py "$d/cmd" >"$d/log"; then
     cat "$d/log" >&2
     return 1
