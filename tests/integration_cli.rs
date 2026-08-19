@@ -37,6 +37,74 @@ fn ac1_ac2_ac6_cli_generates_lists_and_repeats_managed_artifacts() {
 }
 
 #[test]
+fn all_shell_artifacts_complete_versioned_lifecycle() {
+    let temp = tempfile::tempdir().unwrap();
+    let data_home = temp.path().join("data");
+    let directory = data_home.join("hashai/integrations");
+    let mut generated = Vec::new();
+    for shell in ["bash", "zsh", "fish"] {
+        command(&data_home)
+            .args(["integration", "generate", "--shell", shell])
+            .assert()
+            .success();
+        generated.push((
+            shell,
+            fs::read(directory.join(format!("hashai.{shell}"))).unwrap(),
+        ));
+    }
+    let current = command(&data_home)
+        .args(["integration", "list"])
+        .output()
+        .unwrap();
+    let current = String::from_utf8(current.stdout).unwrap();
+    let expected_current = ["bash", "zsh", "fish"]
+        .into_iter()
+        .map(|shell| {
+            format!(
+                "{shell}\t{ARTIFACT_VERSION}\tcurrent\t{}\n",
+                directory.join(format!("hashai.{shell}")).display()
+            )
+        })
+        .collect::<String>();
+    assert_eq!(current, expected_current);
+    for shell in ["bash", "zsh", "fish"] {
+        fs::write(
+            directory.join(format!("hashai.{shell}")),
+            format!("# hashai-integration-version: obsolete\n{shell}\n"),
+        )
+        .unwrap();
+    }
+    let outdated = command(&data_home)
+        .args(["integration", "list"])
+        .output()
+        .unwrap();
+    let outdated = String::from_utf8(outdated.stdout).unwrap();
+    for shell in ["bash", "zsh", "fish"] {
+        assert!(outdated.contains(&format!("{shell}\tobsolete\toutdated\t")));
+    }
+    command(&data_home)
+        .args(["integration", "update"])
+        .assert()
+        .success();
+    for (shell, initial_bytes) in generated {
+        let obsolete = format!("# hashai-integration-version: obsolete\n{shell}\n");
+        assert_eq!(
+            fs::read(directory.join(format!("hashai.{shell}.bak"))).unwrap(),
+            obsolete.as_bytes()
+        );
+        assert_eq!(
+            fs::read(directory.join(format!("hashai.{shell}"))).unwrap(),
+            initial_bytes
+        );
+    }
+    command(&data_home)
+        .args(["integration", "list"])
+        .assert()
+        .success()
+        .stdout(expected_current);
+}
+
+#[test]
 fn ac3_ac4_ac8_cli_update_creates_a_backup_and_rejects_unknown_shells() {
     let temp = tempfile::tempdir().unwrap();
     let data_home = temp.path().join("data");
