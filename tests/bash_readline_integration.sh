@@ -137,7 +137,8 @@ assert_file_equals "$test_dir/expected-success" "${files[0]}"
 
 # AC-8: a structural success-path mutation makes the success assertion fail.
 mutated="$test_dir/hashai.mutated.bash"
-# shellcheck disable=SC2016 -- the mutation must match generated Bash literals.
+# The mutation must match generated Bash literals.
+# shellcheck disable=SC2016
 sed 's/READLINE_LINE=$command/READLINE_LINE=$original_line/' "$artifact" >"$mutated"
 readarray -t files < <(run_tty "$mutated" success "$original" 5 '# ' '\C-g')
 if cmp -s "$test_dir/expected-success" "${files[0]}"; then
@@ -148,7 +149,8 @@ fi
 # AC-8: a structural failure-path mutation must break the same byte-for-byte
 # buffer and cursor preservation oracle used for Core failures.
 failure_mutated="$test_dir/hashai.failure-mutated.bash"
-# shellcheck disable=SC2016 -- the mutation must match generated Bash literals.
+# The mutation must match generated Bash literals.
+# shellcheck disable=SC2016
 sed 's/return 0/READLINE_LINE=corrupted; READLINE_POINT=0; return 0/' "$artifact" >"$failure_mutated"
 readarray -t files < <(run_tty "$failure_mutated" failure "$original" 5 '# ' '\C-g')
 if cmp -s "$test_dir/expected-preserved" "${files[0]}"; then
