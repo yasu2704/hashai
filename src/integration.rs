@@ -19,7 +19,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     HashaiError,
-    config::{Config, Keybinding, Shell},
+    config::{Config, Keybinding, Shell, validate},
 };
 
 pub const ARTIFACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -100,6 +100,7 @@ impl IntegrationManager {
         config: &Config,
     ) -> Result<WriteOutcome, HashaiError> {
         validate_integration_shell(&shell)?;
+        validate(config)?;
         self.with_write_lock(|| self.write_shell(&shell, config))
     }
 
@@ -108,6 +109,9 @@ impl IntegrationManager {
     }
 
     pub fn update_with_config(&self, config: &Config) -> Result<UpdateSummary, HashaiError> {
+        // This must precede even absence checks/locking so an invalid public
+        // Config can never create a directory, lock, backup, or partial update.
+        validate(config)?;
         if self.managed_directory_is_absent()? {
             return Ok(UpdateSummary::default());
         }

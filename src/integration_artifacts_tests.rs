@@ -56,6 +56,65 @@ fn ac3_disabled_artifact_registers_no_binding() {
 }
 
 #[test]
+fn invalid_public_config_cannot_write_or_update_any_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager.generate(shell.clone()).unwrap();
+    }
+    let before: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
+        .into_iter()
+        .map(|shell| {
+            (
+                shell.clone(),
+                fs::read(manager.artifact_path(&shell)).unwrap(),
+                manager.backup_path(&shell),
+            )
+        })
+        .collect();
+    let invalid = Config {
+        trigger: "bad\ntrigger".into(),
+        ..Config::default()
+    };
+    assert!(manager.update_with_config(&invalid).is_err());
+    assert!(manager.generate_with_config(Shell::Bash, &invalid).is_err());
+    for (shell, bytes, backup) in before {
+        assert_eq!(fs::read(manager.artifact_path(&shell)).unwrap(), bytes);
+        assert!(!backup.exists());
+    }
+}
+
+#[test]
+fn update_uses_one_config_snapshot_for_all_installed_shells() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = manager(&temp);
+    for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+        manager.generate(shell).unwrap();
+    }
+    let before: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
+        .into_iter()
+        .map(|shell| {
+            (
+                shell.clone(),
+                fs::read(manager.artifact_path(&shell)).unwrap(),
+            )
+        })
+        .collect();
+    let config = Config {
+        trigger: ",,".into(),
+        keybinding: Keybinding::CtrlX,
+        ..Config::default()
+    };
+    manager.update_with_config(&config).unwrap();
+    for (shell, old) in before {
+        let current = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
+        assert_ne!(current.as_bytes(), old.as_slice());
+        assert_eq!(fs::read(manager.backup_path(&shell)).unwrap(), old);
+        assert!(current.contains(",,"));
+    }
+}
+
+#[test]
 fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
     let temp = tempfile::tempdir().unwrap();
     let manager = manager(&temp);

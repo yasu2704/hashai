@@ -265,7 +265,8 @@ fn load_user_config() -> Result<Option<Config>, HashaiError> {
     }
 }
 
-fn validate(config: &Config) -> Result<(), HashaiError> {
+/// Validates a configuration supplied through either resolution or public APIs.
+pub fn validate(config: &Config) -> Result<(), HashaiError> {
     let bytes = config.trigger.as_bytes();
     if bytes.is_empty()
         || bytes.len() > 64
