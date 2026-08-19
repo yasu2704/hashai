@@ -88,7 +88,10 @@ fn ac1_ac2_ac3_passes_stdin_cwd_fixed_arguments_and_private_temp_files() {
     assert_eq!(result.risk.as_str(), "safe");
     let captured = fs::read_to_string(capture).unwrap();
     let lines: Vec<_> = captured.lines().collect();
-    assert_eq!(lines[0], temp.path().display().to_string());
+    assert_eq!(
+        lines[0],
+        fs::canonicalize(temp.path()).unwrap().display().to_string()
+    );
     assert_eq!(
         &lines[1..26],
         [

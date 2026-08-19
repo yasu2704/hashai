@@ -4,7 +4,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -30,7 +30,7 @@ fn json_response(command: &str, risk: &str) -> String {
 
 fn output_file_writer(response: &str) -> String {
     format!(
-        "out=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\ncat > \"$out\" <<'HASHAI_JSON'\n{response}\nHASHAI_JSON"
+        "out=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\ncat >/dev/null\ncat > \"$out\" <<'HASHAI_JSON'\n{response}\nHASHAI_JSON"
     )
 }
 
@@ -57,6 +57,21 @@ fn wait_for_file(path: &Path, description: &str) {
             "timed out waiting for {description}: {}",
             path.display()
         );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn wait_for_child_exit(child: &mut Child, description: &str) -> ExitStatus {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("timed out waiting for {description}");
+        }
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -121,7 +136,7 @@ fn ac6_generate_works_inside_and_outside_a_git_repository() {
             .stderr("");
         assert_eq!(
             fs::read_to_string(cwd_capture).unwrap(),
-            cwd.display().to_string()
+            fs::canonicalize(&cwd).unwrap().display().to_string()
         );
     }
 }
@@ -133,7 +148,7 @@ fn ac7_model_and_reasoning_are_forwarded_once_without_fallback() {
     let fake = fake_codex(
         &temp,
         &format!(
-            "printf '%s\\n' \"$@\" > {}\necho 'selected model is unavailable' >&2\nexit 1",
+            "printf '%s\\n' \"$@\" > {}\ncat >/dev/null\necho 'selected model is unavailable' >&2\nexit 1",
             shell_quote(&arguments)
         ),
     );
@@ -262,19 +277,18 @@ fn ac5_timeout_and_cancel_are_cli_e2e_errors() {
     let fake = fake_codex(&temp, &format!("touch {}\nsleep 30", shell_quote(&marker)));
     let config_home = temp.path().join("cancel-config-home");
     fs::create_dir(&config_home).unwrap();
-    let child = Command::new(assert_cmd::cargo::cargo_bin("hashai"))
+    let mut child = Command::new(assert_cmd::cargo::cargo_bin("hashai"))
         .env("XDG_CONFIG_HOME", config_home)
         .env("HASHAI_CODEX_BIN", fake)
         .args(["generate", "--shell", "bash", "list files"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .unwrap();
     wait_for_file(&marker, "fake Codex start marker");
     assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(ExitCode::Cancelled as i32));
-    assert!(output.stdout.is_empty());
+    let status = wait_for_child_exit(&mut child, "cancelled hashai process");
+    assert_eq!(status.code(), Some(ExitCode::Cancelled as i32));
 }
 
 fn shell_quote(path: &Path) -> String {

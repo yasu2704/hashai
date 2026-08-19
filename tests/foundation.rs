@@ -293,7 +293,7 @@ fn fake_codex(directory: &Path) -> PathBuf {
     let path = directory.join("fake-codex");
     std::fs::write(
         &path,
-        "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\nprintf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"\n",
+        "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\ncat >/dev/null\nprintf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"\n",
     )
     .unwrap();
     let mut permissions = std::fs::metadata(&path).unwrap().permissions();
