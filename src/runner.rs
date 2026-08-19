@@ -3,7 +3,7 @@ use std::{
     io::Write,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
@@ -125,7 +125,13 @@ impl CodexRunner {
                 "Codex CLI was not found at {}; install Codex CLI and run `codex login`",
                 request.executable.display()
             )),
-            _ => HashaiError::Io(error),
+            _ => HashaiError::Io(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to start Codex CLI at {}: {error}",
+                    request.executable.display()
+                ),
+            )),
         })?;
         if let Some(mut stdin) = child.stdin.take()
             && let Err(error) = stdin.write_all(request.prompt.as_bytes())
@@ -156,9 +162,9 @@ impl CodexRunner {
         };
 
         if !status.success() {
-            return Err(classify_stderr(
-                &fs::read_to_string(stderr.path()).unwrap_or_default(),
-            ));
+            let stderr = fs::read(stderr.path()).unwrap_or_default();
+            let output = fs::read(output.path()).unwrap_or_default();
+            return Err(classify_stderr(&stderr, &status, output.len()));
         }
         parse_generation(&fs::read_to_string(output.path())?)
     }
@@ -182,21 +188,49 @@ fn terminate_process_group(child: &mut std::process::Child) -> Result<(), Hashai
         &mut leader_reaped,
     )? {
         signal_process_group(group, libc::SIGKILL)?;
-        if !wait_for_process_group_exit(
+        // SIGKILL has been sent to every member of the process group. Do not
+        // wait for `kill(-group, 0)` to become ESRCH here: an orphaned child
+        // can remain a zombie until init reaps it, and zombies are already
+        // dead even though kill(2) still reports them as existing.
+        wait_for_leader_exit(
             child,
-            group,
             Instant::now() + Duration::from_secs(2),
             &mut leader_reaped,
-        )? {
+        )?;
+        if !leader_reaped {
             return Err(HashaiError::Io(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "Codex process group did not exit after SIGKILL",
+                "Codex process leader did not exit after SIGKILL",
             )));
         }
     }
 
     if !leader_reaped {
-        let _ = child.wait()?;
+        wait_for_leader_exit(
+            child,
+            Instant::now() + Duration::from_secs(2),
+            &mut leader_reaped,
+        )?;
+        if !leader_reaped {
+            return Err(HashaiError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Codex process leader did not exit after termination",
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn wait_for_leader_exit(
+    child: &mut std::process::Child,
+    deadline: Instant,
+    leader_reaped: &mut bool,
+) -> Result<(), HashaiError> {
+    while !*leader_reaped && Instant::now() < deadline {
+        *leader_reaped = child.try_wait()?.is_some();
+        if !*leader_reaped {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
     Ok(())
 }
@@ -283,7 +317,8 @@ fn parse_generation(output: &str) -> Result<Generation, HashaiError> {
     })
 }
 
-fn classify_stderr(stderr: &str) -> HashaiError {
+fn classify_stderr(stderr: &[u8], status: &ExitStatus, output_bytes: usize) -> HashaiError {
+    let stderr = String::from_utf8_lossy(stderr);
     let normalized = stderr.to_ascii_lowercase();
     if normalized.contains("codex login")
         || normalized.contains("not logged in")
@@ -299,8 +334,9 @@ fn classify_stderr(stderr: &str) -> HashaiError {
             "The configured Codex model or reasoning effort is unavailable; update hashai configuration".to_owned(),
         )
     } else {
-        HashaiError::Io(std::io::Error::other(
-            "Codex CLI failed with an unclassified error",
-        ))
+        HashaiError::Io(std::io::Error::other(format!(
+            "Codex CLI failed with {status}; stderr bytes: {}; output-file bytes: {output_bytes}",
+            stderr.len()
+        )))
     }
 }
