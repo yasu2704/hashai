@@ -10,7 +10,8 @@ function __hashai_fish_replace_buffer
     string match -rq '^(?<buffer>(?s:.*))\n\z' -- "$raw_buffer"; or return 0
     test (string sub -s 1 -l (string length -- "$trigger") -- "$buffer") = "$trigger"; or return 0
 
-    set -l request (string sub -s (math (string length -- "$trigger") + 1) -- "$buffer")
+    set -l raw_request (string sub -s (math (string length -- "$trigger") + 1) -- "$buffer" | string collect -N)
+    string match -rq '^(?<request>(?s:.*))\n\z' -- "$raw_request"; or return 0
     set -l output (command hashai generate --shell fish -- "$request" | string collect -N)
     set -l core_status $pipestatus[1]
     if test "$core_status" -ne 0
