@@ -8,8 +8,9 @@ use std::{
 use clap::{Parser, error::ErrorKind};
 use hashai::{
     HashaiError,
-    cli::{Cli, Command},
+    cli::{Cli, Command, IntegrationCommand},
     config::{ConfigOverrides, ConfigSources},
+    integration::{IntegrationManager, WriteOutcome},
     platform,
     prompt::{EnvironmentInfo, PromptInput, build_prompt},
     runner::{CodexRunner, RunRequest},
@@ -42,7 +43,13 @@ fn run() -> Result<(), HashaiError> {
         }
         Err(error) => return Err(HashaiError::ArgumentOrConfig(error.to_string())),
     };
-    let Command::Generate(args) = cli.command;
+    match cli.command {
+        Command::Generate(args) => run_generate(args),
+        Command::Integration(args) => run_integration(args.command),
+    }
+}
+
+fn run_generate(args: hashai::cli::GenerateArgs) -> Result<(), HashaiError> {
     if args.request.trim().is_empty() {
         return Err(HashaiError::ArgumentOrConfig(
             "request must not be empty".to_owned(),
@@ -83,6 +90,53 @@ fn run() -> Result<(), HashaiError> {
     )?;
     println!("{}", generation.command);
     Ok(())
+}
+
+fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
+    let manager = IntegrationManager::from_system()?;
+    match command {
+        IntegrationCommand::Generate(args) => {
+            let requested_shell = args.shell.or(args.shell_positional).ok_or_else(|| {
+                HashaiError::ArgumentOrConfig(
+                    "integration shell must be bash, zsh, or fish".to_owned(),
+                )
+            })?;
+            let shell = hashai::config::Shell::parse(&requested_shell)?;
+            let outcome = manager.generate(shell.clone())?;
+            print_write_result(&shell, manager.artifact_path(&shell), outcome);
+        }
+        IntegrationCommand::Update => {
+            for (shell, outcome) in manager.update()? {
+                print_write_result(&shell, manager.artifact_path(&shell), outcome);
+            }
+        }
+        IntegrationCommand::List => {
+            for installed in manager.list()? {
+                let version = installed.version.as_deref().unwrap_or("unknown");
+                let status = if installed.is_current {
+                    "current"
+                } else {
+                    "outdated"
+                };
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    installed.shell.as_str(),
+                    version,
+                    status,
+                    installed.path.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_write_result(shell: &hashai::config::Shell, path: PathBuf, outcome: WriteOutcome) {
+    let action = match outcome {
+        WriteOutcome::Written => "written",
+        WriteOutcome::Unchanged => "unchanged",
+    };
+    println!("{}\t{}\t{}", shell.as_str(), action, path.display());
 }
 
 fn codex_executable() -> PathBuf {

@@ -148,6 +148,8 @@ hashai integration generate fish
 
 生成済みファイルを各シェルの設定からsourceする。シェル起動のたびにCoreを起動して統合コードを生成する方式は、起動時間と障害範囲の面からデフォルトにしない。
 
+artifact はユーザーのhashaiデータディレクトリ配下の `integrations/hashai.<shell>` にだけ保存する。`generate` は指定shellのartifactを作成し、`update` は導入済みartifactだけを更新し、`list` は副作用なく導入済みartifactのshell・version・状態・pathをタブ区切りで表示する。artifactにはversion markerを含める。更新は同じ管理ディレクトリ内のatomic renameで行い、既存の通常ファイルを `hashai.<shell>.bak` に保存する。管理対象のディレクトリ、artifact、backupがsymlinkまたは通常ファイル以外の場合は拒否し、任意パスへの出力は提供しない。
+
 ### 6.5 対応環境
 
 - Linux: glibcを使用するx86_64およびaarch64環境。
