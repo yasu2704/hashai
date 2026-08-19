@@ -74,6 +74,54 @@ fn ac1_generate_keeps_the_documented_positional_shell_form() {
         .stdout(format!("fish\twritten\t{}\n", expected.display()));
 }
 
+#[test]
+fn ac4_ac8_cli_update_reports_a_failed_shell_continues_and_rerun_converges() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let data_home = temp.path().join("data");
+    let directory = data_home.join("hashai/integrations");
+    fs::create_dir_all(&directory).unwrap();
+    for shell in ["bash", "zsh", "fish"] {
+        fs::write(
+            directory.join(format!("hashai.{shell}")),
+            "# hashai-integration-version: obsolete\n",
+        )
+        .unwrap();
+    }
+    let zsh_backup = directory.join("hashai.zsh.bak");
+    symlink(temp.path().join("outside"), &zsh_backup).unwrap();
+
+    command(&data_home)
+        .args(["integration", "update"])
+        .assert()
+        .code(1)
+        .stdout(format!(
+            "bash\twritten\t{}\nfish\twritten\t{}\n",
+            directory.join("hashai.bash").display(),
+            directory.join("hashai.fish").display()
+        ))
+        .stderr(predicates::str::contains(
+            "integration update for zsh failed",
+        ));
+    assert_eq!(
+        fs::read_to_string(directory.join("hashai.zsh")).unwrap(),
+        "# hashai-integration-version: obsolete\n"
+    );
+
+    fs::remove_file(zsh_backup).unwrap();
+    command(&data_home)
+        .args(["integration", "update"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "bash\tunchanged\t{}\nzsh\twritten\t{}\nfish\tunchanged\t{}\n",
+            directory.join("hashai.bash").display(),
+            directory.join("hashai.zsh").display(),
+            directory.join("hashai.fish").display()
+        ));
+}
+
 fn command(data_home: &Path) -> Command {
     let mut command = Command::cargo_bin("hashai").unwrap();
     command

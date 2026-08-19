@@ -106,8 +106,22 @@ fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
             print_write_result(&shell, manager.artifact_path(&shell), outcome);
         }
         IntegrationCommand::Update => {
-            for (shell, outcome) in manager.update()? {
+            let summary = manager.update()?;
+            for (shell, outcome) in summary.outcomes {
                 print_write_result(&shell, manager.artifact_path(&shell), outcome);
+            }
+            if !summary.failures.is_empty() {
+                for failure in &summary.failures {
+                    eprintln!(
+                        "hashai: integration update for {} failed: {}",
+                        failure.shell.as_str(),
+                        failure.message
+                    );
+                }
+                return Err(HashaiError::Integration(format!(
+                    "{} integration update(s) failed",
+                    summary.failures.len()
+                )));
             }
         }
         IntegrationCommand::List => {
