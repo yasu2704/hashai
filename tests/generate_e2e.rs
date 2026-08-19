@@ -102,6 +102,24 @@ fn ac1_ac2_ac3_generate_uses_fake_codex_and_keeps_command_stdout_pure() {
 }
 
 #[test]
+fn ac4_allowed_review_and_dangerous_risks_preserve_phase1_command_only_output() {
+    for risk in ["review", "dangerous"] {
+        let temp = TempDir::new().unwrap();
+        let fake = fake_codex(
+            &temp,
+            &output_file_writer(&json_response("printf '%s' ok", risk)),
+        );
+
+        command_with(&temp, &fake)
+            .args(["generate", "--shell", "bash", "list files"])
+            .assert()
+            .success()
+            .stdout("printf '%s' ok\n")
+            .stderr("");
+    }
+}
+
+#[test]
 fn ac6_generate_works_inside_and_outside_a_git_repository() {
     for in_repository in [false, true] {
         let temp = TempDir::new().unwrap();
@@ -223,11 +241,11 @@ fn ac4_ac5_cli_maps_success_invalid_output_and_process_errors_to_documented_code
             ExitCode::InvalidOutput as i32,
         ),
         (
-            "echo 'codex login is required' >&2\nexit 1".to_owned(),
+            "cat >/dev/null\necho 'codex login is required' >&2\nexit 1".to_owned(),
             ExitCode::Unauthenticated as i32,
         ),
         (
-            "echo 'unclassified failure' >&2\nexit 1".to_owned(),
+            "cat >/dev/null\necho 'unclassified failure' >&2\nexit 1".to_owned(),
             ExitCode::General as i32,
         ),
     ];
