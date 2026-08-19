@@ -17,6 +17,14 @@ def write_all(fd: int, data: bytes) -> None:
         data = data[written:]
 
 
+def marker_seen(tail: bytes, output: bytes, marker: bytes) -> tuple[bool, bytes]:
+    """Detect a readiness marker without losing it to a prompt suffix."""
+    combined = tail + output
+    if marker in combined:
+        return True, b""
+    return False, combined[-(len(marker) - 1) :]
+
+
 def read_until_marker(fd: int, marker: bytes, deadline: float) -> None:
     """Forward PTY output until setup has returned to an interactive prompt."""
     received = b""
@@ -30,9 +38,11 @@ def read_until_marker(fd: int, marker: bytes, deadline: float) -> None:
             output = os.read(fd, 4096)
         except OSError:
             continue
-        received = (received + output)[-len(marker) :]
+        seen, received = marker_seen(received, output, marker)
         sys.stdout.buffer.write(output)
         sys.stdout.buffer.flush()
+        if seen:
+            return
 
 
 def main() -> int:
