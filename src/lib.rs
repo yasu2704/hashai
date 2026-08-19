@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod platform;
 pub mod prompt;
+pub mod runner;
 
 use std::fmt;
 
@@ -27,6 +28,12 @@ pub enum ExitCode {
 pub enum HashaiError {
     ArgumentOrConfig(String),
     UnsupportedPlatform(String),
+    CodexNotFound(String),
+    Unauthenticated(String),
+    ModelUnavailable(String),
+    Timeout(String),
+    Cancelled(String),
+    InvalidOutput(String),
     Io(std::io::Error),
 }
 
@@ -35,6 +42,12 @@ impl HashaiError {
         match self {
             Self::ArgumentOrConfig(_) => ExitCode::ArgumentOrConfig as i32,
             Self::UnsupportedPlatform(_) => ExitCode::UnsupportedPlatform as i32,
+            Self::CodexNotFound(_) => ExitCode::CodexNotFound as i32,
+            Self::Unauthenticated(_) => ExitCode::Unauthenticated as i32,
+            Self::ModelUnavailable(_) => ExitCode::ModelUnavailable as i32,
+            Self::Timeout(_) => ExitCode::Timeout as i32,
+            Self::Cancelled(_) => ExitCode::Cancelled as i32,
+            Self::InvalidOutput(_) => ExitCode::InvalidOutput as i32,
             Self::Io(_) => ExitCode::General as i32,
         }
     }
@@ -43,9 +56,14 @@ impl HashaiError {
 impl fmt::Display for HashaiError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ArgumentOrConfig(message) | Self::UnsupportedPlatform(message) => {
-                formatter.write_str(message)
-            }
+            Self::ArgumentOrConfig(message)
+            | Self::UnsupportedPlatform(message)
+            | Self::CodexNotFound(message)
+            | Self::Unauthenticated(message)
+            | Self::ModelUnavailable(message)
+            | Self::Timeout(message)
+            | Self::Cancelled(message)
+            | Self::InvalidOutput(message) => formatter.write_str(message),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
         }
     }

@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use assert_cmd::Command as AssertCommand;
 use clap::Parser;
@@ -189,6 +192,7 @@ fn ac6_generate_ignores_a_project_local_config_file() {
         .env_remove("HASHAI_SHELL")
         .env_remove("HASHAI_CODEX_MODEL")
         .env_remove("HASHAI_CODEX_REASONING_EFFORT")
+        .env("HASHAI_CODEX_BIN", fake_codex(config_home.path()))
         .args(["generate", "--shell", "bash", "list files"])
         .assert()
         .success();
@@ -207,6 +211,7 @@ fn ac6_unrelated_non_unicode_environment_does_not_break_config_loading() {
             "UNRELATED_INVALID",
             std::ffi::OsString::from_vec(vec![0xff]),
         )
+        .env("HASHAI_CODEX_BIN", fake_codex(config_home.path()))
         .args(["generate", "--shell", "bash", "list files"])
         .assert()
         .success();
@@ -279,4 +284,20 @@ fn user_config() -> Config {
             extra_instructions: Some("user instructions".to_owned()),
         },
     }
+}
+
+#[cfg(unix)]
+fn fake_codex(directory: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = directory.join("fake-codex");
+    std::fs::write(
+        &path,
+        "#!/bin/sh\nout=''\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --output-last-message) out=\"$2\"; shift 2;; *) shift;; esac; done\nprintf '%s' '{\"command\":\"echo ok\",\"risk\":\"safe\"}' > \"$out\"\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    path
 }
