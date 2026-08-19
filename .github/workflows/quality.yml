@@ -113,3 +113,11 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
       - run: cargo build --all-targets --all-features
+      - name: Static doctor smoke
+        run: |
+          set +e
+          HASHAI_CODEX_BIN="$PWD/definitely-missing-codex" target/debug/hashai doctor --format json --shell zsh > doctor-report.json
+          status=$?
+          set -e
+          test "$status" = 3
+          python3 -c 'import json; r=json.load(open("doctor-report.json")); expected=["platform","shell.kind","shell.version","codex.command","codex.version","codex.exec","codex.ephemeral","codex.ignore_user_config","codex.ignore_rules","codex.model","codex.config","codex.sandbox","codex.disable.shell_tool","codex.disable.browser_use","codex.disable.computer_use","codex.disable.apps","codex.skip_git_repo_check","codex.output_schema","codex.output_last_message","codex.project_doc_max_bytes","codex.project_doc_fallback_filenames","auth","model_reasoning","keybinding","integration","json_processing","outside_git_repository","live_probe"]; assert r["schema_version"] == 1 and r["mode"] == "static" and r["exit"] == 3 and [c["id"] for c in r["checks"]] == expected'

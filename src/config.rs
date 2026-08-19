@@ -23,6 +23,10 @@ pub enum Shell {
 }
 
 impl Shell {
+    pub fn is_supported(&self) -> bool {
+        !matches!(self, Self::Auto)
+    }
+
     pub fn parse(value: &str) -> Result<Self, HashaiError> {
         match value {
             "auto" => Ok(Self::Auto),

@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod doctor;
 pub mod integration;
 pub mod platform;
 pub mod prompt;
@@ -40,6 +41,7 @@ pub enum HashaiError {
     Cancelled(String),
     InvalidOutput(String),
     Integration(String),
+    Diagnostic(i32),
     Io(std::io::Error),
 }
 
@@ -55,6 +57,7 @@ impl HashaiError {
             Self::Cancelled(_) => ExitCode::Cancelled as i32,
             Self::InvalidOutput(_) => ExitCode::InvalidOutput as i32,
             Self::Integration(_) => ExitCode::General as i32,
+            Self::Diagnostic(exit_code) => *exit_code,
             Self::Io(_) => ExitCode::General as i32,
         }
     }
@@ -72,6 +75,7 @@ impl fmt::Display for HashaiError {
             | Self::Cancelled(message)
             | Self::InvalidOutput(message) => formatter.write_str(message),
             Self::Integration(message) => formatter.write_str(message),
+            Self::Diagnostic(_) => Ok(()),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
         }
     }
