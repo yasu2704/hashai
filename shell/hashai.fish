@@ -1,7 +1,10 @@
 # Fish commandline integration for hashai.
 
 function __hashai_fish_replace_buffer
-    set -l trigger (or $HASHAI_TRIGGER '# ')
+    set -l trigger '# '
+    if set -q HASHAI_TRIGGER
+        set trigger $HASHAI_TRIGGER
+    end
     set -l buffer (commandline --current-buffer)
     test "$__hashai_fish_enabled" = 1; or return 0
     test (string sub -s 1 -l (string length -- "$trigger") -- "$buffer") = "$trigger"; or return 0
