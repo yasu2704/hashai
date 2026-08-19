@@ -14,7 +14,7 @@ source '$artifact'
 bind -M default \\cg >'$d/binding.default'
 bind -M insert \\cg >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
-function __hashai_fish_replace_buffer; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
+function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
 function __fish_capture; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\cx __fish_capture
 bind -M insert \\cx __fish_capture
@@ -28,6 +28,7 @@ fi
 }
 original=$'# 日本語 😀  '\''quoted'\'' $(echo no) !  whitespace '
 run success "$original" 5 default; printf '%s' "printf '日本語 😀  spaced'" >"$d/expected"; cmp "$d/expected" "$d/buffer"; "$HASHAI_FISH_BIN" -c "string length -- \"printf '日本語 😀  spaced'\"" >"$d/cursor-expected"; cmp "$d/cursor-expected" "$d/cursor"; printf '%s' "${original#'# '}" >"$d/expected-request"; cmp "$d/expected-request" "$d/request"
+printf '%s' "$original" >"$d/expected-exposed"; cmp "$d/expected-exposed" "$d/exposed"
 run success "$original" 5 insert; cmp "$d/expected" "$d/buffer"
 grep -F '__hashai_fish_replace_buffer' "$d/binding.default" "$d/binding.insert" >/dev/null
 run multiline "$original" 5 default; printf '%s' $'printf first\nprintf 日本語 😀\n' >"$d/expected"; cmp "$d/expected" "$d/buffer"
