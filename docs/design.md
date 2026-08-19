@@ -55,10 +55,10 @@ git add -A && git commit && git push
 
 ### 4.2 代替操作
 
-キーバインドが利用できない環境向けに、明示的なコマンドも提供する。
+キーバインドが利用できない環境向けに、生成コマンドを標準出力へ表示する明示的なコマンドも提供する。外部プロセスから呼び出し元シェルの入力バッファは変更できないため、入力バッファへの挿入はシェル統合を経由する場合に限る。
 
 ```bash
-hashai '1GB 以上のファイルを探して'
+hashai generate '1GB 以上のファイルを探して'
 ```
 
 短縮エイリアスを提供する場合は、以下を候補とする。
@@ -66,6 +66,8 @@ hashai '1GB 以上のファイルを探して'
 ```bash
 ?? '1GB 以上のファイルを探して'
 ```
+
+`??` は各シェルに適したエイリアスまたは略記として提供し、`hashai generate` と同様に生成コマンドを標準出力へ表示する。入力バッファへの挿入は `Ctrl+G` のシェル統合だけが担当する。
 
 ### 4.3 `#` と通常コメントの衝突
 
@@ -96,7 +98,7 @@ Fish: commandline / bind ---------+         |
 2. Codex用プロンプトを構築する。
 3. `codex exec` を読み取り専用で起動する。
 4. 構造化された結果を検証する。
-5. コマンド、説明、危険度を呼び出し元へ返す。
+5. コマンドと危険度を呼び出し元へ返す。
 6. タイムアウト、キャンセル、エラーを統一的に処理する。
 
 ### 5.2 Shell integration
@@ -187,20 +189,17 @@ codex exec - \
       "type": "string",
       "minLength": 1
     },
-    "description": {
-      "type": "string"
-    },
     "risk": {
       "type": "string",
       "enum": ["safe", "review", "dangerous"]
     }
   },
-  "required": ["command", "description", "risk"],
+  "required": ["command", "risk"],
   "additionalProperties": false
 }
 ```
 
-通常の入力バッファには `command` だけを挿入する。`description` と `risk` は警告表示や説明操作に利用する。
+通常の入力バッファまたは標準出力には `command` だけを出力する。`risk` が `review` または `dangerous` の場合は、診断用の標準エラーへ一方向の警告を表示する。確認選択や説明などの専用対話UIは設けない。
 
 ### 7.3 プロンプト方針
 
@@ -210,7 +209,7 @@ codex exec - \
 - 対象OS、ディストリビューション、シェルを指定する。
 - 現在の作業ディレクトリを指定する。
 - 不要な `sudo` を使用しない。
-- 破壊的操作や不可逆操作を避ける。
+- 破壊的操作や不可逆操作は `dangerous` と判定し、利用者の意図を満たせる場合は回復可能な代替手段を優先する。
 - 曖昧な値を捏造しない。
 - コミットメッセージなどが不明なら、対話的なコマンドを選ぶ。
 - 複数の操作は順序依存がある場合だけ `&&` で接続する。
@@ -235,8 +234,6 @@ codex exec - \
 - Git status
 - プロジェクト種別
 - package managerや代表的な設定ファイル
-- 直前のコマンドと終了コード
-- 直前の標準エラー出力
 
 ファイル内容、Git差分、環境変数、シークレットはデフォルトで送信しない。コンテキストを追加する場合は、何を送るか利用者が確認できる診断機能を用意する。
 
@@ -253,8 +250,6 @@ hashaiはsingle-turnのみを提供し、会話状態を保持しない。
 - コマンド生成とエージェント型タスク実行の境界が曖昧になる。
 
 「それを元に戻して」のように過去の依頼を前提とする入力は解決しない。必要な情報を含む独立した依頼として入力し直してもらう。
-
-再生成や修正を提供する場合も会話セッションにはしない。元の依頼、直前の候補、今回の修正指示だけを一時的にCodexへ渡し、その処理が終了した時点で破棄する。
 
 ## 10. 安全性
 
@@ -306,7 +301,6 @@ keybinding = "ctrl-g"
 shell = "auto"
 timeout_seconds = 30
 context = "minimal"
-insert_only = true
 show_risk = true
 reasoning_effort = "low"
 
@@ -319,9 +313,7 @@ extra_instructions = "Prefer rg over grep when available."
 ## 13. CLI案
 
 ```text
-hashai <natural-language>
 hashai generate <natural-language>
-hashai explain <command>
 hashai integration generate <bash|zsh|fish>
 hashai integration update
 hashai integration list
@@ -360,16 +352,13 @@ hashai doctor
 
 ### ShellGPT
 
-- Execute / Describe / Abort の明確な選択肢。
 - OSとシェルを考慮した生成。
 - 生成コマンドを入力バッファへ戻して編集可能にする方式。
-- コマンド生成と説明の分離。
 
 ### Warp AI
 
 - `#` を自然言語モードとして認識させる操作モデル。
 - 生成中・通常コマンド・自然言語入力を視覚的に区別する考え方。
-- 履歴、再利用可能なプロンプト、AI候補の統合。
 
 ### zsh-ai
 
@@ -388,7 +377,6 @@ hashai doctor
 - コメント形式の入力と `Ctrl+G` の組み合わせ。
 - シェル別few-shot例。
 - single-turnをデフォルトにする考え方。
-- multi-turn実装は参考対象に含めず、会話状態を持たない。
 
 ## 15. 実装フェーズ
 
@@ -416,12 +404,6 @@ hashai doctor
 - キーバインドとトリガーの設定。
 - `hashai doctor`。
 
-### Phase 4: コンテキスト拡張
-
-- オプトインのプロジェクト検出。
-- 直前の失敗コマンドを修正するモード。
-- 再利用可能なプロンプト。
-
 ## 16. テスト方針
 
 - Coreの単体テストではCodexプロセスを差し替え、正常、空出力、不正JSON、タイムアウト、キャンセルを検証する。
@@ -446,12 +428,10 @@ hashai doctor
 
 - Coreの実装言語。単一バイナリと起動速度を優先するならRustまたはGoが候補。
 - 危険度をモデル出力だけでなく、ローカル解析でも補正するか。
-- `#` + Enterの自動変換を提供するか、`Ctrl+G` のみにするか。
 - GNUとBSDのコマンド差をどこまで自動判定するか。
 - Codexのモデルと推論強度をhashai側で指定するか、Codex設定へ委譲するか。
-- 説明表示を標準エラー、ポップアップ、pagerのどれで行うか。
 
-初期判断としては、単一バイナリ、single-turn、`Ctrl+G`、入力バッファへの挿入のみ、Codex設定の再利用を優先する。
+初期判断としては、単一バイナリ、single-turn、`Ctrl+G`、Codex設定の再利用を優先する。生成結果は自動実行せず、シェル統合では入力バッファへ挿入し、明示的CLIでは標準出力へ表示する。
 
 ## 18. 参考資料
 
