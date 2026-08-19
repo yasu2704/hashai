@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run an interactive Zsh command file through a real PTY with a timeout."""
 
+import errno
 import os
 import pty
 import select
@@ -10,10 +11,42 @@ import sys
 import time
 
 
-def write_all(fd: int, data: bytes) -> None:
-    """Write one keystroke group completely; PTYs may accept partial writes."""
+MAX_WRITE_CHUNK = 256
+
+
+def drain(fd: int, pending: bytearray) -> None:
+    """Drain terminal output without losing readiness bytes during a write."""
+    try:
+        output = os.read(fd, 4096)
+    except (BlockingIOError, OSError):
+        return
+    pending.extend(output)
+    sys.stdout.buffer.write(output)
+    sys.stdout.buffer.flush()
+
+
+def write_all(fd: int, data: bytes, pending: bytearray, group_index: int | None = None) -> None:
+    """Duplex PTY write with bounded EAGAIN handling and preserved output."""
+    deadline = time.monotonic() + 10
+    group = f"group {group_index}" if group_index is not None else "write"
     while data:
-        written = os.write(fd, data)
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"PTY {group} did not become writable with {len(data)} bytes pending")
+        readable, writable, _ = select.select([fd], [fd], [], 0.1)
+        if readable:
+            drain(fd, pending)
+        if not writable:
+            continue
+        try:
+            written = os.write(fd, data[:MAX_WRITE_CHUNK])
+        except InterruptedError:
+            continue
+        except BlockingIOError as error:
+            if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                raise
+            continue
+        if written == 0:
+            raise RuntimeError("PTY write returned zero bytes")
         data = data[written:]
 
 
@@ -25,10 +58,16 @@ def marker_seen(tail: bytes, output: bytes, marker: bytes) -> tuple[bool, bytes]
     return False, combined[-(len(marker) - 1) :]
 
 
-def read_until_marker(fd: int, marker: bytes, deadline: float) -> None:
+def read_until_marker(fd: int, marker: bytes, deadline: float, pending: bytearray) -> None:
     """Forward PTY output until setup has returned to an interactive prompt."""
     received = b""
     while marker not in received:
+        if pending:
+            output = bytes(pending)
+            pending.clear()
+            seen, received = marker_seen(received, output, marker)
+            if seen:
+                return
         if time.monotonic() >= deadline:
             raise RuntimeError(f"Zsh did not emit PTY readiness marker {marker!r}")
         ready, _, _ = select.select([fd], [], [], 0.1)
@@ -36,7 +75,7 @@ def read_until_marker(fd: int, marker: bytes, deadline: float) -> None:
             continue
         try:
             output = os.read(fd, 4096)
-        except OSError:
+        except (BlockingIOError, OSError):
             continue
         seen, received = marker_seen(received, output, marker)
         sys.stdout.buffer.write(output)
@@ -61,11 +100,12 @@ def main() -> int:
     )
     os.close(slave)
     os.set_blocking(master, False)
+    pending = bytearray()
     try:
         for index, commands in enumerate(command_groups):
-            write_all(master, commands)
+            write_all(master, commands, pending, index)
             if index + 1 < len(command_groups):
-                read_until_marker(master, b"__HASHAI_PTY_READY__", time.monotonic() + 10)
+                read_until_marker(master, b"__HASHAI_PTY_READY__", time.monotonic() + 10, pending)
         deadline = time.monotonic() + 10
         while process.poll() is None:
             if time.monotonic() >= deadline:
@@ -74,9 +114,7 @@ def main() -> int:
                 raise RuntimeError("interactive Zsh did not exit within 10 seconds")
             select.select([master], [], [], 0.1)
             try:
-                output = os.read(master, 4096)
-                sys.stdout.buffer.write(output)
-                sys.stdout.buffer.flush()
+                drain(master, pending)
             except OSError:
                 pass
         return process.wait()

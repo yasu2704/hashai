@@ -4,6 +4,7 @@ set -euo pipefail
 
 : "${HASHAI_BIN:?set HASHAI_BIN to the compiled hashai binary}"
 : "${HASHAI_ZSH_BIN:=zsh}"
+source tests/shell_contract_cases.sh
 
 if ! command -v "$HASHAI_ZSH_BIN" >/dev/null 2>&1; then
     printf 'Zsh 5.8+ is required, but %q was not found\n' "$HASHAI_ZSH_BIN" >&2
@@ -18,6 +19,8 @@ fi
 
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
+canonical_request="$test_dir/canonical-request"
+printf '%s' "$HASHAI_CONTRACT_REQUEST" >"$canonical_request"
 export XDG_DATA_HOME="$test_dir/data"
 "$HASHAI_BIN" integration generate --shell zsh >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
@@ -26,23 +29,7 @@ artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
 readiness_command="print -r -- '__HASHAI_PTY_''READY__'"
 
 fake_bin="$test_dir/bin"
-mkdir -p "$fake_bin"
-cat >"$fake_bin/hashai" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s' "${5-}" >"$HASHAI_REQUEST_FILE"
-case ${HASHAI_TEST_MODE:-success} in
-    success) printf '%s\n' "printf '日本語 😀  spaced'" ;;
-    multiline) printf '%s\n' $'printf \'first\'\nprintf \'日本語 😀\'\n' ;;
-    noauto) printf 'touch -- %q\n' "$HASHAI_AUTOEXEC_MARKER" ;;
-    failure) printf '%s\n' 'fake core failure' >&2; exit 6 ;;
-    timeout) printf '%s\n' 'fake core timeout' >&2; exit 6 ;;
-    cancel) printf '%s\n' 'fake core cancelled' >&2; exit 7 ;;
-    empty) exit 0 ;;
-    *) printf 'unknown mode\n' >&2; exit 2 ;;
-esac
-EOF
-chmod +x "$fake_bin/hashai"
+write_shell_contract_fake "$fake_bin" zsh
 
 assert_file_equals() {
     local expected=$1 actual=$2
@@ -67,10 +54,13 @@ assert_file_equals() {
 }
 
 run_tty() {
-    local artifact_path=$1 mode=$2 line=$3 point=$4 keymap=$5 trigger=${6-}
-    local commands="$test_dir/commands" buffer="$test_dir/buffer" cursor="$test_dir/cursor"
-    local request="$test_dir/request" binding="$test_dir/binding"
+    local artifact_path=$1 mode=$2 line=$3 point=$4 keymap=$5 trigger=${6-} load_from_file=${7-}
+    local commands="$test_dir/commands" setup="$test_dir/zle-setup" buffer="$test_dir/buffer" cursor="$test_dir/cursor"
+    local request="$test_dir/request" binding="$test_dir/binding" setup_buffer="$test_dir/setup-buffer"
     local line_length=${#line} move_count left_moves=
+    if [[ $line == "$HASHAI_CONTRACT_REQUEST" ]]; then
+        load_from_file=$canonical_request
+    fi
     : >"$request"
     if (( point > line_length )); then
         printf 'test cursor %s exceeds line length %s\n' "$point" "$line_length" >&2
@@ -81,7 +71,10 @@ run_tty() {
         left_moves+=$'\e[D'
         ((move_count--))
     done
-cat >"$commands" <<EOF
+# Keep declarations out of the terminal input stream. macOS ZLE can redraw
+# while a long interactive paste is still arriving; source is atomic shell
+# input, and the test still drives the installed binding with literal Ctrl-G.
+cat >"$setup" <<EOF
 bindkey -$keymap
 source '$artifact_path'
 source '$artifact_path'
@@ -95,15 +88,30 @@ function __hashai_zsh_capture_buffer() {
 }
 zle -N __hashai_zsh_capture_buffer
 bindkey '^X' __hashai_zsh_capture_buffer
+function __hashai_zsh_load_contract_buffer() {
+    BUFFER="\$(<'$load_from_file')"
+    CURSOR=$point
+    print -rn -- "\$BUFFER" >'$setup_buffer'
+    zle redisplay
+    print -u2 -r -- '__HASHAI_PTY_''READY__'
+}
+zle -N __hashai_zsh_load_contract_buffer
+bindkey '^Y' __hashai_zsh_load_contract_buffer
 functions[__hashai_zsh_real]=\$functions[__hashai_zsh_replace_buffer]
 function __hashai_zsh_replace_buffer() {
     __hashai_zsh_real
     print -u2 -r -- '__HASHAI_PTY_''READY__'
 }
 EOF
-    printf '%s\n\0' "$readiness_command" >>"$commands"
-    printf '%s%s\007\0\030' "$line" "$left_moves" >>"$commands"
-    if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
+    printf "source '%s'\n%s\n\0" "$setup" "$readiness_command" >"$commands"
+    if [[ -n $load_from_file ]]; then
+        # Ctrl-Y is a test-only setup widget. It loads the canonical bytes,
+        # including Tab, then literal Ctrl-G invokes the installed artifact.
+        printf '\031\0\007\0\030' >>"$commands"
+    else
+        printf '%s%s\007\0\030' "$line" "$left_moves" >>"$commands"
+    fi
+    if ! PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"; then
         printf '%s\n' 'Zsh PTY runner failed; log follows:' >&2
@@ -123,6 +131,10 @@ EOF
     TTY_LOG="$test_dir/tty.log"
     TTY_BINDING_EMACS="$binding.emacs"
     TTY_BINDING_VIINS="$binding.viins"
+    TTY_SETUP_BUFFER=$setup_buffer
+    if [[ -n $load_from_file ]]; then
+        assert_file_equals "$load_from_file" "$setup_buffer"
+    fi
 }
 
 run_binding_dispatch() {
@@ -133,7 +145,7 @@ run_binding_dispatch() {
         "function __hashai_zsh_replace_buffer() { __hashai_zsh_real; print -u2 -r -- '__HASHAI_PTY_''READY__'; }" \
         'function __hashai_zsh_exit_widget() { BUFFER=exit; zle accept-line; }' "$readiness_command" >"$commands"
     printf '%s\007\0\030' '# dispatch 日本語 😀' >>"$commands"
-    if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
+    if ! PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/dispatch.log"; then
@@ -147,7 +159,7 @@ run_binding_dispatch() {
 run_noninteractive() {
     local line=$1 result="$test_dir/non-tty-result" request="$test_dir/non-tty-request"
     : >"$request"
-    PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=success HASHAI_REQUEST_FILE="$request" \
+    PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE=success HASHAI_REQUEST_FILE="$request" \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" "$HASHAI_ZSH_BIN" -f -c \
         "source '$artifact'; BUFFER=\"\$1\"; CURSOR=5; __hashai_zsh_replace_buffer; print -rn -- \"\$BUFFER\" >'$result'" \
         -- "$line"
@@ -158,7 +170,7 @@ run_noninteractive() {
 run_interactive_non_tty() {
     local request="$test_dir/interactive-non-tty-request"
     : >"$request"
-    PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=success HASHAI_REQUEST_FILE="$request" \
+    PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE=success HASHAI_REQUEST_FILE="$request" \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" "$HASHAI_ZSH_BIN" -f -i <<EOF
 source '$artifact'
 BUFFER='# interactive non-tty'
@@ -168,8 +180,8 @@ EOF
     INTERACTIVE_NON_TTY_REQUEST=$request
 }
 
-original=$'# 日本語 😀  \'quoted\'  $(echo no) !  whitespace '
-success_line="printf '日本語 😀  spaced'"
+original=$HASHAI_CONTRACT_REQUEST
+success_line=$HASHAI_CONTRACT_SUCCESS
 success_point=${#success_line}
 run_tty "$artifact" success "$original" 5 e '# '
 printf '%s' "$success_line" >"$test_dir/expected-success-buffer"
@@ -178,6 +190,9 @@ assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
 assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
 printf '%s' "${original#"# "}" >"$test_dir/expected-request"
 assert_file_equals "$test_dir/expected-request" "$TTY_REQUEST"
+# The test-only setup widget was actually used before literal Ctrl-G and
+# retained the canonical tab-containing bytes exactly in ZLE's BUFFER.
+assert_file_equals "$canonical_request" "$TTY_SETUP_BUFFER"
 
 # Literal Ctrl+G reaches the installed widget. Ctrl+U clears the replacement
 # rather than Enter executing it, so the fake Core's touch must not run.
@@ -186,7 +201,7 @@ run_binding_dispatch
 assert_file_equals "$test_dir/expected-dispatch-request" "$DISPATCH_REQUEST"
 test ! -e "$test_dir/autoexecuted"
 
-multiline_line=$'printf \'first\'\nprintf \'日本語 😀\'\n'
+multiline_line=$HASHAI_CONTRACT_MULTILINE
 multiline_point=${#multiline_line}
 run_tty "$artifact" multiline "$original" 5 e '# '
 printf '%s' "$multiline_line" >"$test_dir/expected-multiline-buffer"
@@ -203,7 +218,7 @@ assert_file_equals "$test_dir/expected-untouched-cursor" "$TTY_CURSOR"
 test ! -s "$TTY_REQUEST"
 
 # AC-3: errors, timeout, cancellation, and empty output preserve buffer and cursor.
-for mode in failure timeout cancel empty; do
+for mode in failure timeout cancel empty status-{1..9}; do
     run_tty "$artifact" "$mode" "$original" 5 e '# '
     printf '%s' "$original" >"$test_dir/expected-preserved-buffer"
     printf '%s\n' 5 >"$test_dir/expected-preserved-cursor"
@@ -232,7 +247,17 @@ run_tty "$artifact" success "$original" 5 v '# '
 assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
 assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
 
-# AC-8: structural success and failure mutations are caught by the same oracles.
+# dispatch permutation mutation: installed literal Ctrl-G keeps input when a
+# copied artifact dispatches to the wrong Core shell target.
+dispatch_mutated="$test_dir/hashai.dispatch-mutated.zsh"
+test "$(grep -Fc -- '--shell zsh' "$artifact")" -eq 1
+sed 's/--shell zsh/--shell fish/' "$artifact" >"$dispatch_mutated"
+test "$(grep -Fc -- '--shell zsh' "$dispatch_mutated")" -eq 0
+test "$(grep -Fc -- '--shell fish' "$dispatch_mutated")" -eq 1
+run_tty "$dispatch_mutated" success "$original" 5 e '# '
+printf '%s' "$original" >"$test_dir/expected-dispatch-preserved"
+assert_file_equals "$test_dir/expected-dispatch-preserved" "$TTY_BUFFER"
+test ! -s "$TTY_REQUEST"
 mutated="$test_dir/hashai.mutated.zsh"
 sed 's/BUFFER=$generated/BUFFER=corrupted/' "$artifact" >"$mutated"
 grep -F 'BUFFER=corrupted' "$mutated" >/dev/null
