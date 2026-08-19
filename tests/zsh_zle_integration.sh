@@ -80,15 +80,21 @@ bindkey -$keymap
 function __hashai_zsh_capture_buffer() {
     print -rn -- "\$BUFFER" >'$buffer'
     print -r -- "\$CURSOR" >'$cursor'
+    BUFFER=exit
+    zle accept-line
 }
 zle -N __hashai_zsh_capture_buffer
 bindkey '^X' __hashai_zsh_capture_buffer
 EOF
     printf '%s\n\0' "$readiness_command" >>"$commands"
-    printf '%s%s\007\030\025exit\n' "$line" "$left_moves" >>"$commands"
-    PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
+    printf '%s%s\007\030' "$line" "$left_moves" >>"$commands"
+    if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
-        python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"
+        python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"; then
+        printf '%s\n' 'Zsh PTY runner failed; log follows:' >&2
+        cat "$test_dir/tty.log" >&2
+        return 1
+    fi
     if [[ ! -f $buffer || ! -f $cursor ]]; then
         printf '%s\n' 'Zsh PTY did not produce a capture manifest; log follows:' >&2
         cat "$test_dir/tty.log" >&2
@@ -105,12 +111,17 @@ EOF
 run_binding_dispatch() {
     local request="$test_dir/dispatch-request" commands="$test_dir/dispatch-commands"
     : >"$request"
-    printf "source '%s'\n%s\n\0" "$artifact" "$readiness_command" >"$commands"
-    printf '%s\007\025exit\n' '# dispatch 日本語 😀' >>"$commands"
-    PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
+    printf "source '%s'\n%s\nzle -N __hashai_zsh_exit_widget\nbindkey '^X' __hashai_zsh_exit_widget\n%s\n\0" \
+        "$artifact" 'function __hashai_zsh_exit_widget() { BUFFER=exit; zle accept-line; }' "$readiness_command" >"$commands"
+    printf '%s\007\030' '# dispatch 日本語 😀' >>"$commands"
+    if ! PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
-        python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/dispatch.log"
+        python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/dispatch.log"; then
+        printf '%s\n' 'Zsh dispatch PTY runner failed; log follows:' >&2
+        cat "$test_dir/dispatch.log" >&2
+        return 1
+    fi
     DISPATCH_REQUEST=$request
 }
 
