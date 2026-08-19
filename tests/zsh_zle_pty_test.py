@@ -10,6 +10,11 @@ from zsh_zle_pty import marker_seen
 
 
 class MarkerSeenTests(unittest.TestCase):
+    def test_setup_input_cannot_echo_the_complete_marker(self) -> None:
+        marker = b"__HASHAI_PTY_READY__"
+        setup = b"print -r -- '__HASHAI_PTY_'\"'READY__'"
+        self.assertNotIn(marker, setup)
+
     def test_detects_marker_followed_by_prompt_bytes(self) -> None:
         marker = b"__HASHAI_PTY_READY__"
         seen, tail = marker_seen(b"", marker + b"\r\n% ", marker)

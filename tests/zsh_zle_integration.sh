@@ -21,6 +21,9 @@ trap 'rm -rf "$test_dir"' EXIT
 export XDG_DATA_HOME="$test_dir/data"
 "$HASHAI_BIN" integration generate --shell zsh >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
+# The emitted marker must not appear verbatim in setup input: a terminal echoes
+# typed setup before Zsh executes it, and the PTY runner waits on the output.
+readiness_command="print -r -- '__HASHAI_PTY_'\"'READY__'"
 
 fake_bin="$test_dir/bin"
 mkdir -p "$fake_bin"
@@ -81,7 +84,7 @@ function __hashai_zsh_capture_buffer() {
 zle -N __hashai_zsh_capture_buffer
 bindkey '^X' __hashai_zsh_capture_buffer
 EOF
-    printf '%s\n\0' 'print -r -- __HASHAI_PTY_READY__' >>"$commands"
+    printf '%s\n\0' "$readiness_command" >>"$commands"
     printf '%s%s\007\030\025exit\n' "$line" "$left_moves" >>"$commands"
     PATH="$fake_bin:$PATH" HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
@@ -102,7 +105,7 @@ EOF
 run_binding_dispatch() {
     local request="$test_dir/dispatch-request" commands="$test_dir/dispatch-commands"
     : >"$request"
-    printf "source '%s'\nprint -r -- __HASHAI_PTY_READY__\n\0" "$artifact" >"$commands"
+    printf "source '%s'\n%s\n\0" "$artifact" "$readiness_command" >"$commands"
     printf '%s\007\025exit\n' '# dispatch 日本語 😀' >>"$commands"
     PATH="$fake_bin:$PATH" HASHAI_TEST_MODE=noauto HASHAI_REQUEST_FILE="$request" \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
