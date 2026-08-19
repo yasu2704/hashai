@@ -3,9 +3,10 @@ import os
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from fish_pty import ProbeResponder, marker_seen, terminal_responses
+from fish_pty import ProbeResponder, marker_seen, terminal_responses, write_all
 
 class MarkerTests(unittest.TestCase):
     marker = b"__HASHAI_FISH_READY__"
@@ -52,6 +53,11 @@ class MarkerTests(unittest.TestCase):
         second = responder.responses(b"\x1b]11;?\x1b[6n\x1b[0c")
         self.assertEqual(first, [b"\x1b[?1;2c", b"\x1b]11;rgb:0000/0000/0000\x1b\\"])
         self.assertEqual(second, [b"\x1b[?1;2c", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1b[1;1R"])
+
+    def test_write_all_retries_eagain_and_partial_write(self):
+        writes = [BlockingIOError(11, "again"), 1, 2]
+        with patch("fish_pty.os.write", side_effect=writes), patch("fish_pty.select.select", return_value=([], [9], [])):
+            write_all(9, b"abc")
 
     def test_terminal_replies_do_not_satisfy_marker(self):
         data = b"".join(terminal_responses(b"\x1b[c"))

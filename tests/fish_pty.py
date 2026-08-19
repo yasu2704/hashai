@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run Fish command groups through a real PTY with marker synchronization."""
-import fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
+import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
 class ProbeResponder:
     """Return deterministic replies for Fish's startup terminal probes."""
@@ -43,8 +43,18 @@ def terminal_responses(data):
     return ProbeResponder().responses(data)
 
 def write_all(fd, data):
+    deadline = time.monotonic() + 10
     while data:
-        count = os.write(fd, data)
+        try:
+            count = os.write(fd, data)
+        except InterruptedError:
+            continue
+        except BlockingIOError as error:
+            if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK): raise
+            if time.monotonic() >= deadline or not select.select([], [fd], [], .1)[1]:
+                if time.monotonic() >= deadline: raise RuntimeError("PTY did not become writable")
+                continue
+            continue
         data = data[count:]
 
 def wait_marker(fd, marker, responder):
