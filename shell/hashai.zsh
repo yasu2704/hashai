@@ -3,9 +3,13 @@
 # This file is embedded in the managed artifact. It does not run hashai until
 # the user invokes the ZLE binding.
 
+typeset -g __hashai_zsh_trigger='# '
+typeset -g __hashai_zsh_keybinding='^G'
+typeset -g __hashai_zsh_enabled=1
+
 __hashai_zsh_replace_buffer() {
     emulate -L zsh
-    local trigger=${HASHAI_TRIGGER:-{{TRIGGER}}}
+    local trigger=${HASHAI_TRIGGER:-$__hashai_zsh_trigger}
     local request output generated
 
     # ZLE widgets run with stdin/stdout redirected even when their editor is
@@ -49,8 +53,8 @@ __hashai_zsh_replace_buffer() {
 __hashai_zsh_install_binding() {
     # Keep this renderer-local seam separate from the public configuration
     # surface until a keybinding setting is specified.
-    local keybinding='{{KEYBINDING}}'
-    [[ {{ENABLED}} == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
+    local keybinding=$__hashai_zsh_keybinding
+    [[ $__hashai_zsh_enabled == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
     [[ -o interactive && -t 0 && -t 1 && -t 2 ]] || return 0
     zle -N __hashai_zsh_replace_buffer
     bindkey -M emacs "$keybinding" __hashai_zsh_replace_buffer

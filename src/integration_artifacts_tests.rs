@@ -47,7 +47,11 @@ fn ac3_disabled_artifact_registers_no_binding() {
             .generate_with_config(shell.clone(), &config)
             .unwrap();
         let artifact = fs::read_to_string(manager.artifact_path(&shell)).unwrap();
-        assert!(artifact.contains("[[ 0 == 1") || artifact.contains("test 0 = 1"));
+        assert!(
+            artifact.contains("__hashai_bash_enabled=0")
+                || artifact.contains("__hashai_zsh_enabled=0")
+                || artifact.contains("__hashai_fish_enabled_config 0")
+        );
     }
 }
 
@@ -90,8 +94,9 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
             Shell::Fish => {
                 assert!(contents.contains("__hashai_fish_replace_buffer"));
                 assert!(contents.contains("__hashai_fish_enabled"));
-                assert!(contents.contains("bind --mode default \\cg"));
-                assert!(contents.contains("bind --mode insert \\cg"));
+                assert!(contents.contains("__hashai_fish_keybinding \\cg"));
+                assert!(contents.contains("bind --mode default $__hashai_fish_keybinding"));
+                assert!(contents.contains("bind --mode insert $__hashai_fish_keybinding"));
                 assert!(contents.contains("hashai generate --shell fish --"));
                 assert!(!contents.contains("eval"));
             }

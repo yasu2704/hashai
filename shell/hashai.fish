@@ -1,8 +1,12 @@
 # Fish commandline integration for hashai.
 
+set -g __hashai_fish_trigger '# '
+set -g __hashai_fish_keybinding \cg
+set -g __hashai_fish_enabled_config 1
+
 function __hashai_fish_replace_buffer
     test "$__hashai_fish_enabled" = 1; or return 0
-    set -l trigger {{TRIGGER}}
+    set -l trigger $__hashai_fish_trigger
     if set -q HASHAI_TRIGGER
         set trigger $HASHAI_TRIGGER
     end
@@ -33,9 +37,9 @@ end
 function __hashai_fish_install_binding
     status is-interactive; or return 0
     test -t 0; and test -t 1; and test -t 2; or return 0
-    test {{ENABLED}} = 1; and test "$HASHAI_TRIGGER_ENABLED" != false; or return 0
-    bind --mode default {{KEYBINDING}} __hashai_fish_replace_buffer
-    bind --mode insert {{KEYBINDING}} __hashai_fish_replace_buffer
+    test $__hashai_fish_enabled_config = 1; and test "$HASHAI_TRIGGER_ENABLED" != false; or return 0
+    bind --mode default $__hashai_fish_keybinding __hashai_fish_replace_buffer
+    bind --mode insert $__hashai_fish_keybinding __hashai_fish_replace_buffer
     set -g __hashai_fish_enabled 1
 end
 

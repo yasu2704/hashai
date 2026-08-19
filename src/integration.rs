@@ -371,16 +371,58 @@ fn render(template: &str, shell: &Shell, config: &Config, header: &str) -> Strin
         (Shell::Fish, Keybinding::CtrlX) => "\\cx",
         _ => "",
     };
-    format!(
-        "{header}{}",
-        template
-            .replace("{{TRIGGER}}", &trigger)
-            .replace("{{KEYBINDING}}", key)
+    let rendered = match shell {
+        Shell::Bash => template
             .replace(
-                "{{ENABLED}}",
-                if config.trigger_enabled { "1" } else { "0" }
+                "__hashai_bash_trigger='# '",
+                &format!("__hashai_bash_trigger={trigger}"),
             )
-    )
+            .replace(
+                "__hashai_bash_keybinding='\\C-g'",
+                &format!("__hashai_bash_keybinding='{key}'"),
+            )
+            .replace(
+                "__hashai_bash_enabled=1",
+                &format!(
+                    "__hashai_bash_enabled={}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Zsh => template
+            .replace(
+                "typeset -g __hashai_zsh_trigger='# '",
+                &format!("typeset -g __hashai_zsh_trigger={trigger}"),
+            )
+            .replace(
+                "typeset -g __hashai_zsh_keybinding='^G'",
+                &format!("typeset -g __hashai_zsh_keybinding='{key}'"),
+            )
+            .replace(
+                "typeset -g __hashai_zsh_enabled=1",
+                &format!(
+                    "typeset -g __hashai_zsh_enabled={}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Fish => template
+            .replace(
+                "set -g __hashai_fish_trigger '# '",
+                &format!("set -g __hashai_fish_trigger {trigger}"),
+            )
+            .replace(
+                "set -g __hashai_fish_keybinding \\cg",
+                &format!("set -g __hashai_fish_keybinding {key}"),
+            )
+            .replace(
+                "set -g __hashai_fish_enabled_config 1",
+                &format!(
+                    "set -g __hashai_fish_enabled_config {}",
+                    if config.trigger_enabled { 1 } else { 0 }
+                ),
+            ),
+        Shell::Auto => template.to_owned(),
+    };
+    format!("{header}{rendered}")
 }
 
 fn sh_quote(value: &str) -> String {

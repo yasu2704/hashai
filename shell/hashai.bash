@@ -3,8 +3,12 @@
 # This file is embedded in the managed artifact. It does not run hashai until
 # the user invokes the Readline binding.
 
+__hashai_bash_trigger='# '
+__hashai_bash_keybinding='\C-g'
+__hashai_bash_enabled=1
+
 __hashai_bash_replace_line() {
-    local trigger=${HASHAI_TRIGGER:-{{TRIGGER}}}
+    local trigger=${HASHAI_TRIGGER:-$__hashai_bash_trigger}
     local request command output
 
     # bind -x is meaningful only for an interactive terminal. In particular,
@@ -49,8 +53,8 @@ __hashai_bash_replace_line() {
 __hashai_bash_install_binding() {
     # Keep this renderer-local seam separate from the public configuration
     # surface until a keybinding setting is specified.
-    local keybinding='{{KEYBINDING}}'
-    [[ {{ENABLED}} == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
+    local keybinding=$__hashai_bash_keybinding
+    [[ $__hashai_bash_enabled == 1 && ${HASHAI_TRIGGER_ENABLED:-true} != false ]] || return 0
     [[ -t 0 && -t 1 && -t 2 ]] || return 0
     bind -x "\"${keybinding}\":__hashai_bash_replace_line"
 }
