@@ -92,20 +92,24 @@ fn codex_executable() -> PathBuf {
 }
 
 fn detected_environment() -> EnvironmentInfo {
-    let mut environment = EnvironmentInfo {
+    apply_test_os_override(EnvironmentInfo {
         os: std::env::consts::OS.to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
         distribution_or_version: detected_os_detail(),
-    };
+    })
+}
 
-    // Integration tests must exercise the CLI's unsupported-platform exit path without
-    // pretending that a Linux runner is a different operating system in production.
-    #[cfg(debug_assertions)]
+#[cfg(debug_assertions)]
+fn apply_test_os_override(mut environment: EnvironmentInfo) -> EnvironmentInfo {
     if let Some(os) = std::env::var_os("HASHAI_TEST_OS").and_then(|value| value.into_string().ok())
     {
         environment.os = os;
     }
+    environment
+}
 
+#[cfg(not(debug_assertions))]
+fn apply_test_os_override(environment: EnvironmentInfo) -> EnvironmentInfo {
     environment
 }
 
