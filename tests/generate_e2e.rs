@@ -98,12 +98,21 @@ fn ac1_ac2_ac3_generate_uses_fake_codex_and_keeps_command_stdout_pure() {
         .assert()
         .success()
         .stdout(format!("{command}\n"))
-        .stderr("");
+        .stderr("hashai: warning: generated command risk=review; inspect before execution\n");
 }
 
 #[test]
-fn ac4_allowed_review_and_dangerous_risks_preserve_phase1_command_only_output() {
-    for risk in ["review", "dangerous"] {
+fn ac4_ac5_risk_warnings_are_unavoidable_and_keep_stdout_command_only() {
+    for (risk, expected_stderr) in [
+        (
+            "review",
+            "hashai: warning: generated command risk=review; inspect before execution\n",
+        ),
+        (
+            "dangerous",
+            "hashai: warning: generated command risk=dangerous; inspect carefully before execution\n",
+        ),
+    ] {
         let temp = TempDir::new().unwrap();
         let fake = fake_codex(
             &temp,
@@ -115,8 +124,23 @@ fn ac4_allowed_review_and_dangerous_risks_preserve_phase1_command_only_output() 
             .assert()
             .success()
             .stdout("printf '%s' ok\n")
-            .stderr("");
+            .stderr(expected_stderr);
     }
+}
+
+#[test]
+fn ac1_ac2_local_dangerous_risk_escalates_a_safe_model_without_rejection() {
+    let temp = TempDir::new().unwrap();
+    let fake = fake_codex(
+        &temp,
+        &output_file_writer(&json_response("rm -rf build", "safe")),
+    );
+    command_with(&temp, &fake)
+        .args(["generate", "--shell", "bash", "remove build"])
+        .assert()
+        .success()
+        .stdout("rm -rf build\n")
+        .stderr("hashai: warning: generated command risk=dangerous; inspect carefully before execution\n");
 }
 
 #[test]

@@ -88,6 +88,18 @@ fn run_generate(args: hashai::cli::GenerateArgs) -> Result<(), HashaiError> {
         },
         &CANCELLED,
     )?;
+    let risk = hashai::risk::combine(generation.risk, hashai::risk::analyze(&generation.command));
+    match risk {
+        hashai::runner::Risk::Safe => {}
+        hashai::runner::Risk::Review => {
+            eprintln!("hashai: warning: generated command risk=review; inspect before execution");
+        }
+        hashai::runner::Risk::Dangerous => {
+            eprintln!(
+                "hashai: warning: generated command risk=dangerous; inspect carefully before execution"
+            );
+        }
+    }
     println!("{}", generation.command);
     Ok(())
 }
