@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import errno
 import os
 import pathlib
 import sys
@@ -55,7 +56,7 @@ class MarkerTests(unittest.TestCase):
         self.assertEqual(second, [b"\x1b[?1;2c", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1b[1;1R"])
 
     def test_write_all_retries_eagain_and_partial_write(self):
-        writes = [BlockingIOError(11, "again"), 1, 2]
+        writes = [BlockingIOError(errno.EAGAIN, "again"), 1, 2]
         with patch("fish_pty.os.write", side_effect=writes), patch("fish_pty.select.select", return_value=([], [9], [])):
             write_all(9, b"abc")
 
