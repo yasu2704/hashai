@@ -222,12 +222,19 @@ fn command(data_home: &Path) -> Command {
 #[test]
 fn ac1_ac7_config_show_is_deterministic_and_redacts_prompt_content() {
     let temp = tempfile::tempdir().unwrap();
+    let config_dir = temp.path().join("config/hashai");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        "[prompt]\nextra_instructions = \"do-not-print\"\n",
+    )
+    .unwrap();
     Command::cargo_bin("hashai").unwrap()
         .env("XDG_CONFIG_HOME", temp.path().join("config"))
         .env("XDG_DATA_HOME", temp.path().join("data"))
         .env_remove("HASHAI_TRIGGER").env_remove("HASHAI_TRIGGER_ENABLED").env_remove("HASHAI_KEYBINDING")
         .args(["config", "show"])
         .assert().success()
-        .stdout("trigger = \"# \"\ntrigger_enabled = true\nkeybinding = \"ctrl-g\"\nprompt.extra_instructions = \"<unset>\"\n")
+        .stdout("trigger = \"# \"\ntrigger_enabled = true\nkeybinding = \"ctrl-g\"\nprompt.extra_instructions = \"<set>\"\n")
         .stdout(predicates::str::contains("do-not-print").not());
 }
