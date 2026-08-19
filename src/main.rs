@@ -1,4 +1,9 @@
-use std::process::ExitCode as ProcessExitCode;
+use std::{
+    path::PathBuf,
+    process::ExitCode as ProcessExitCode,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use clap::{Parser, error::ErrorKind};
 use hashai::{
@@ -7,9 +12,13 @@ use hashai::{
     config::{ConfigOverrides, ConfigSources},
     platform,
     prompt::{EnvironmentInfo, PromptInput, build_prompt},
+    runner::{CodexRunner, RunRequest},
 };
 
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
 fn main() -> ProcessExitCode {
+    let _ = ctrlc::set_handler(|| CANCELLED.store(true, Ordering::SeqCst));
     match run() {
         Ok(()) => ProcessExitCode::SUCCESS,
         Err(error) => {
@@ -53,17 +62,33 @@ fn run() -> Result<(), HashaiError> {
     let environment = detected_environment();
     platform::validate(&environment.os, shell.as_str())?;
     let current_dir = std::env::current_dir()?;
-    let _prompt = build_prompt(&PromptInput {
+    let prompt = build_prompt(&PromptInput {
         request: args.request,
         shell,
-        current_dir,
+        current_dir: current_dir.clone(),
         environment,
         extra_instructions: config.prompt.extra_instructions,
     });
 
-    // Codex process execution belongs to Phase 1B.  This phase establishes the
-    // parse/config/prompt boundary without executing a command or printing one.
+    CANCELLED.store(false, Ordering::SeqCst);
+    let generation = CodexRunner::new().run(
+        RunRequest {
+            executable: codex_executable(),
+            prompt,
+            current_dir,
+            codex: config.codex,
+            timeout: Duration::from_secs(config.timeout_seconds),
+        },
+        &CANCELLED,
+    )?;
+    println!("{}", generation.command);
     Ok(())
+}
+
+fn codex_executable() -> PathBuf {
+    std::env::var_os("HASHAI_CODEX_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("codex"))
 }
 
 fn detected_environment() -> EnvironmentInfo {
