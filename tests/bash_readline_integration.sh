@@ -131,6 +131,19 @@ printf '%s' "${original#"# "}" >"$test_dir/expected-request"
 assert_file_equals "$test_dir/expected-request" "${files[1]}"
 grep -F '__hashai_bash_replace_line' "${files[2]}" >/dev/null
 
+# AC-1/AC-5: review and dangerous warnings remain visible on the interactive
+# terminal while the command stays an editable replacement, never execution.
+for mode in review dangerous; do
+    readarray -t files < <(run_tty "$artifact" "$mode" "$original" 5 '# ' '\\C-x')
+    assert_file_equals "$test_dir/expected-success" "${files[0]}"
+    assert_file_equals "$test_dir/expected-request" "${files[1]}"
+    case $mode in
+        review) grep -F "$HASHAI_CONTRACT_REVIEW_WARNING" "$test_dir/tty.log" >/dev/null ;;
+        dangerous) grep -F "$HASHAI_CONTRACT_DANGEROUS_WARNING" "$test_dir/tty.log" >/dev/null ;;
+    esac
+    test ! -e "$test_dir/autoexecuted"
+done
+
 # A literal Ctrl+X reaches the bind -x function in the PTY. Ctrl+U clears the
 # replacement instead of Enter executing it; the fake Core's touch command
 # therefore proves the artifact never auto-executes generated text.

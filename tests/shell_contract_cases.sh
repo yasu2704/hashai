@@ -8,6 +8,8 @@
 HASHAI_CONTRACT_REQUEST=$'# 日本語 😀  \'quoted\'  $(echo no) !\twhitespace '
 HASHAI_CONTRACT_SUCCESS="printf '日本語 😀  spaced'"
 HASHAI_CONTRACT_MULTILINE=$'printf \'first\'\nprintf \'日本語 😀\'\n'
+HASHAI_CONTRACT_REVIEW_WARNING='hashai: warning: generated command risk=review; inspect before execution'
+HASHAI_CONTRACT_DANGEROUS_WARNING='hashai: warning: generated command risk=dangerous; inspect carefully before execution'
 # Fish expands a literal tab in its editor before commandline exposure.
 HASHAI_CONTRACT_FISH_EXPOSED_REQUEST=$'# 日本語 😀  \'quoted\' $(echo no) !  whitespace '
 
@@ -25,6 +27,14 @@ test "$4" = --
 printf '%s' "${5-}" >"$HASHAI_REQUEST_FILE"
 case ${HASHAI_TEST_MODE:-success} in
     success) printf '%s\n' "printf '日本語 😀  spaced'" ;;
+    review)
+        printf '%s\n' 'hashai: warning: generated command risk=review; inspect before execution' >&2
+        printf '%s\n' "printf '日本語 😀  spaced'"
+        ;;
+    dangerous)
+        printf '%s\n' 'hashai: warning: generated command risk=dangerous; inspect carefully before execution' >&2
+        printf '%s\n' "printf '日本語 😀  spaced'"
+        ;;
     multiline) printf '%s\n' $'printf \'first\'\nprintf \'日本語 😀\'\n' ;;
     noauto) printf 'touch -- %q\n' "$HASHAI_AUTOEXEC_MARKER" ;;
     empty) exit 0 ;;
