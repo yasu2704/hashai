@@ -21,6 +21,7 @@ use crate::{HashaiError, config::Shell};
 
 pub const ARTIFACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const VERSION_MARKER: &str = "# hashai-integration-version: ";
+const BASH_INTEGRATION: &str = include_str!("../shell/hashai.bash");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WriteOutcome {
@@ -325,10 +326,16 @@ fn artifact_version(contents: &str) -> Option<String> {
 }
 
 fn artifact_contents(shell: &Shell) -> String {
-    format!(
-        "# hashai integration artifact for {}\n# hashai-integration-version: {ARTIFACT_VERSION}\n# This file intentionally does not invoke hashai or codex during shell startup.\n# Shell editor bindings are installed by the shell-specific integration phase.\n",
+    let header = format!(
+        "# hashai integration artifact for {}\n# hashai-integration-version: {ARTIFACT_VERSION}\n# This file intentionally does not invoke hashai or codex during shell startup.\n",
         shell.as_str()
-    )
+    );
+    match shell {
+        Shell::Bash => format!("{header}{BASH_INTEGRATION}"),
+        Shell::Zsh | Shell::Fish | Shell::Auto => format!(
+            "{header}# Shell editor bindings are installed by the shell-specific integration phase.\n"
+        ),
+    }
 }
 
 #[cfg(test)]
