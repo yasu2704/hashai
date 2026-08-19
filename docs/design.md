@@ -132,6 +132,7 @@ Fish: commandline / bind ---------+         |
 ### 6.3 Fish
 
 - `bind` で `Ctrl+G` にFish関数を割り当てる。
+- Fish の editor が公開する `commandline` buffer を契約境界とする。terminal/editor が入力改行を正規化した場合でも、その公開bufferを `string collect -N` で一要素としてCoreへ渡し、Core側で再分割しない。
 - `commandline` で入力を取得・置換する。
 - FishはBash/Zshと構文が異なるため、プロンプトへ `fish` を明示する。
 - コマンド置換時の改行分割とクォートに注意する。
