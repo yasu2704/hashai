@@ -161,9 +161,29 @@ impl ConfigSources {
     /// Reads only the user's configuration path.  No repository-local path is considered.
     pub fn from_system(cli: ConfigOverrides) -> Result<Config, HashaiError> {
         let user_config = load_user_config()?;
-        let environment = std::env::vars().collect();
+        let environment = relevant_environment()?;
         Self::resolve(user_config, &environment, cli)
     }
+}
+
+fn relevant_environment() -> Result<BTreeMap<String, String>, HashaiError> {
+    let mut environment = BTreeMap::new();
+    for name in [
+        ENV_TRIGGER,
+        ENV_TIMEOUT_SECONDS,
+        ENV_SHELL,
+        ENV_CODEX_MODEL,
+        ENV_CODEX_REASONING_EFFORT,
+    ] {
+        let Some(value) = std::env::var_os(name) else {
+            continue;
+        };
+        let value = value
+            .into_string()
+            .map_err(|_| HashaiError::ArgumentOrConfig(format!("{name} must be valid Unicode")))?;
+        environment.insert(name.to_owned(), value);
+    }
+    Ok(environment)
 }
 
 pub fn user_config_path() -> Result<PathBuf, HashaiError> {

@@ -77,6 +77,57 @@ fn ac3_precedence_is_cli_then_environment_then_user_config_then_defaults() {
 }
 
 #[test]
+fn ac3_environment_overrides_user_config_when_no_cli_override_is_present() {
+    let user = user_config();
+    let environment = BTreeMap::from([
+        ("HASHAI_TRIGGER".to_owned(), "## ".to_owned()),
+        ("HASHAI_TIMEOUT_SECONDS".to_owned(), "22".to_owned()),
+        ("HASHAI_SHELL".to_owned(), "fish".to_owned()),
+        (
+            "HASHAI_CODEX_MODEL".to_owned(),
+            "environment-model".to_owned(),
+        ),
+        (
+            "HASHAI_CODEX_REASONING_EFFORT".to_owned(),
+            "medium".to_owned(),
+        ),
+    ]);
+
+    let resolved =
+        ConfigSources::resolve(Some(user), &environment, ConfigOverrides::default()).unwrap();
+
+    assert_eq!(resolved.trigger, "## ");
+    assert_eq!(resolved.timeout_seconds, 22);
+    assert_eq!(resolved.shell, Shell::Fish);
+    assert_eq!(resolved.codex.model, "environment-model");
+    assert_eq!(resolved.codex.reasoning_effort, "medium");
+    assert_eq!(
+        resolved.prompt.extra_instructions.as_deref(),
+        Some("user instructions")
+    );
+}
+
+#[test]
+fn ac3_user_config_overrides_defaults_when_no_higher_source_is_present() {
+    let resolved = ConfigSources::resolve(
+        Some(user_config()),
+        &BTreeMap::new(),
+        ConfigOverrides::default(),
+    )
+    .unwrap();
+
+    assert_eq!(resolved.trigger, ",,");
+    assert_eq!(resolved.timeout_seconds, 11);
+    assert_eq!(resolved.shell, Shell::Zsh);
+    assert_eq!(resolved.codex.model, "user-model");
+    assert_eq!(resolved.codex.reasoning_effort, "minimal");
+    assert_eq!(
+        resolved.prompt.extra_instructions.as_deref(),
+        Some("user instructions")
+    );
+}
+
+#[test]
 fn ac4_defaults_match_the_design() {
     let defaults = Config::default();
     assert_eq!(defaults.codex.model, "gpt-5.6-luna");
@@ -143,6 +194,45 @@ fn ac6_generate_ignores_a_project_local_config_file() {
         .success();
 }
 
+#[cfg(unix)]
+#[test]
+fn ac6_unrelated_non_unicode_environment_does_not_break_config_loading() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let config_home = tempfile::tempdir().unwrap();
+    AssertCommand::cargo_bin("hashai")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env(
+            "UNRELATED_INVALID",
+            std::ffi::OsString::from_vec(vec![0xff]),
+        )
+        .args(["generate", "--shell", "bash", "list files"])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn ac6_relevant_non_unicode_environment_is_a_controlled_argument_error() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let config_home = tempfile::tempdir().unwrap();
+    AssertCommand::cargo_bin("hashai")
+        .unwrap()
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .env(
+            "HASHAI_CODEX_MODEL",
+            std::ffi::OsString::from_vec(vec![0xff]),
+        )
+        .args(["generate", "--shell", "bash", "list files"])
+        .assert()
+        .code(ExitCode::ArgumentOrConfig as i32)
+        .stderr(predicates::str::contains(
+            "HASHAI_CODEX_MODEL must be valid Unicode",
+        ));
+}
+
 #[test]
 fn ac7_argument_errors_and_unsupported_operating_systems_have_distinct_exit_codes() {
     let unsupported_os = hashai::platform::validate("windows", "bash").unwrap_err();
@@ -174,4 +264,19 @@ fn ac7_empty_requests_and_unknown_shells_are_argument_errors() {
         .args(["generate", "   "])
         .assert()
         .code(ExitCode::ArgumentOrConfig as i32);
+}
+
+fn user_config() -> Config {
+    Config {
+        trigger: ",,".to_owned(),
+        timeout_seconds: 11,
+        shell: Shell::Zsh,
+        codex: hashai::config::CodexConfig {
+            model: "user-model".to_owned(),
+            reasoning_effort: "minimal".to_owned(),
+        },
+        prompt: hashai::config::PromptConfig {
+            extra_instructions: Some("user instructions".to_owned()),
+        },
+    }
 }
