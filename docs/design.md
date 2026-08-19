@@ -148,6 +148,8 @@ hashai integration generate fish
 
 生成済みファイルを各シェルの設定からsourceする。シェル起動のたびにCoreを起動して統合コードを生成する方式は、起動時間と障害範囲の面からデフォルトにしない。
 
+artifact はユーザーのhashaiデータディレクトリ配下の `integrations/hashai.<shell>` にだけ保存する。絶対パスの `XDG_DATA_HOME` が明示されている場合はOSを問わずその配下の `hashai/integrations` を使用し、相対パスまたは未指定時はOS標準のユーザーデータディレクトリを使用する。`generate` は指定shellのartifactを作成し、`update` は導入済みartifactだけを更新し、`list` は副作用なく導入済みartifactのshell・version・状態・pathをタブ区切りで表示する。artifactにはversion markerを含める。更新はshellごとのforward recoveryとし、失敗したshellの既存artifactはbyte-for-byte保持しつつ、他の導入済みshellの更新を継続する。成功と失敗を表示して全体はnonzeroで終了し、問題を解消して再実行すれば未更新artifactだけが更新される。更新はartifactごとに同じ管理ディレクトリ内のatomic renameで行い、既存の通常ファイルを `hashai.<shell>.bak` に保存する。書込み操作は管理ディレクトリに残す通常ファイル `.hashai-integration.lock` のadvisory lockで協調するhashaiプロセスを直列化する。ロック競合時は待機せず制御されたエラーで終了し、OSが保持者の終了時にlockを解放するためstale lockを削除する操作は不要とする。管理対象のディレクトリ、artifact、backup、lockがsymlinkまたは通常ファイル以外の場合は拒否し、任意パスへの出力は提供しない。これは同一ユーザーが管理するディレクトリを前提にした防御であり、悪意ある外部プロセスによるpath raceを完全に防ぐセキュリティ境界ではない。
+
 ### 6.5 対応環境
 
 - Linux: glibcを使用するx86_64およびaarch64環境。

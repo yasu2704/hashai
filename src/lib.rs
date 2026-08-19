@@ -2,9 +2,13 @@
 
 pub mod cli;
 pub mod config;
+pub mod integration;
 pub mod platform;
 pub mod prompt;
 pub mod runner;
+
+#[cfg(test)]
+mod integration_artifacts_tests;
 
 use std::fmt;
 
@@ -34,6 +38,7 @@ pub enum HashaiError {
     Timeout(String),
     Cancelled(String),
     InvalidOutput(String),
+    Integration(String),
     Io(std::io::Error),
 }
 
@@ -48,6 +53,7 @@ impl HashaiError {
             Self::Timeout(_) => ExitCode::Timeout as i32,
             Self::Cancelled(_) => ExitCode::Cancelled as i32,
             Self::InvalidOutput(_) => ExitCode::InvalidOutput as i32,
+            Self::Integration(_) => ExitCode::General as i32,
             Self::Io(_) => ExitCode::General as i32,
         }
     }
@@ -64,6 +70,7 @@ impl fmt::Display for HashaiError {
             | Self::Timeout(message)
             | Self::Cancelled(message)
             | Self::InvalidOutput(message) => formatter.write_str(message),
+            Self::Integration(message) => formatter.write_str(message),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
         }
     }
