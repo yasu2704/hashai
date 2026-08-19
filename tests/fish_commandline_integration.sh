@@ -6,14 +6,18 @@ d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data"
 "$HASHAI_BIN" integration generate --shell fish >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
 mkdir "$d/bin"
 printf '%s\n' '#!/usr/bin/env bash' 'test "$#" -eq 5' 'test "$1" = generate' 'test "$2" = --shell' 'test "$3" = fish' 'test "$4" = --' 'printf "%s" "${5-}" >"$HASHAI_REQUEST_FILE"' "case \${HASHAI_TEST_MODE:-success} in success) printf '%s\\n' \"printf '日本語 😀  spaced'\";; multiline) printf '%s' \$'printf first\\nprintf 日本語 😀\\n\\n';; noauto) printf 'touch -- %q\\n' \"\$HASHAI_AUTOEXEC_MARKER\";; empty) :;; malformed) printf malformed;; failure|timeout|cancel) printf fake-failure >&2; exit 6;; esac" >"$d/bin/hashai"; chmod +x "$d/bin/hashai"
-run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local length moves=; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; cat >"$d/cmd" <<EOF
+run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local mode_setup= length moves=; [[ $map == insert ]] && mode_setup=$'fish_vi_key_bindings\nset -g fish_bind_mode insert'; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; cat >"$d/cmd" <<EOF
+$mode_setup
 bind -M $map \\cg __hashai_fish_replace_buffer
 source '$artifact'
 source '$artifact'
+bind -M default \\cg >'$d/binding.default'
+bind -M insert \\cg >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
 function __hashai_fish_replace_buffer; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
 function __fish_capture; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\cx __fish_capture
+bind -M insert \\cx __fish_capture
 echo '__HASHAI_FISH_'READY__
 EOF
 printf '%s%s\007\0\030' "$b" "$moves" >>"$d/cmd"
@@ -25,6 +29,7 @@ fi
 original=$'# 日本語 😀  '\''quoted'\'' $(echo no) !  whitespace '
 run success "$original" 5 default; printf '%s' "printf '日本語 😀  spaced'" >"$d/expected"; cmp "$d/expected" "$d/buffer"; "$HASHAI_FISH_BIN" -c "string length -- \"printf '日本語 😀  spaced'\"" >"$d/cursor-expected"; cmp "$d/cursor-expected" "$d/cursor"; printf '%s' "${original#'# '}" >"$d/expected-request"; cmp "$d/expected-request" "$d/request"
 run success "$original" 5 insert; cmp "$d/expected" "$d/buffer"
+grep -F '__hashai_fish_replace_buffer' "$d/binding.default" "$d/binding.insert" >/dev/null
 run multiline "$original" 5 default; printf '%s' $'printf first\nprintf 日本語 😀\n' >"$d/expected"; cmp "$d/expected" "$d/buffer"
 run noauto "$original" 5 default; test ! -e "$d/auto"
 run success 'echo untouched' 3 default; printf '%s' 'echo untouched' >"$d/expected"; cmp "$d/expected" "$d/buffer"; test ! -s "$d/request"
