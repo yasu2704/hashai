@@ -27,16 +27,31 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
         let contents = fs::read_to_string(&artifact).unwrap();
         assert!(contents.contains(&format!("# hashai-integration-version: {ARTIFACT_VERSION}")));
         assert!(contents.contains("does not invoke hashai or codex during shell startup"));
-        if shell == Shell::Bash {
-            assert!(contents.contains("__hashai_bash_replace_line"));
-            assert!(contents.contains("HASHAI_TRIGGER"));
-            assert!(contents.contains("keybinding='\\C-g'"));
-            assert!(contents.contains("READLINE_LINE"));
-            assert!(contents.contains("READLINE_POINT"));
-            assert!(contents.contains("hashai generate --shell bash --"));
-            assert!(!contents.contains("eval"));
-        } else {
-            assert!(is_comments_only(&contents), "{}", artifact.display());
+        match shell {
+            Shell::Bash => {
+                assert!(contents.contains("__hashai_bash_replace_line"));
+                assert!(contents.contains("HASHAI_TRIGGER"));
+                assert!(contents.contains("keybinding='\\C-g'"));
+                assert!(contents.contains("READLINE_LINE"));
+                assert!(contents.contains("READLINE_POINT"));
+                assert!(contents.contains("hashai generate --shell bash --"));
+                assert!(!contents.contains("eval"));
+            }
+            Shell::Zsh => {
+                assert!(contents.contains("__hashai_zsh_replace_buffer"));
+                assert!(contents.contains("HASHAI_TRIGGER"));
+                assert!(contents.contains("keybinding='^G'"));
+                assert!(contents.contains("__hashai_zsh_zle_enabled"));
+                assert!(contents.contains("bindkey -M emacs \"$keybinding\""));
+                assert!(contents.contains("bindkey -M viins \"$keybinding\""));
+                assert!(contents.contains("BUFFER"));
+                assert!(contents.contains("CURSOR=${#BUFFER}"));
+                assert!(contents.contains("hashai generate --shell zsh --"));
+                assert!(!contents.contains("eval"));
+            }
+            Shell::Fish | Shell::Auto => {
+                assert!(is_comments_only(&contents), "{}", artifact.display());
+            }
         }
     }
 }
