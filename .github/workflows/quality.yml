@@ -81,10 +81,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install supported Fish
         run: |
-          if [ "$RUNNER_OS" = Linux ] && ! command -v fish >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes fish; fi
-          command -v fish
-          fish --version
-          echo "FISH_BIN=$(command -v fish)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Linux ]; then
+            if ! command -v fish >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes fish; fi
+            fish_bin=$(command -v fish)
+          else
+            brew install fish
+            fish_bin=$(brew --prefix fish)/bin/fish
+          fi
+          test -x "$fish_bin"
+          "$fish_bin" --version
+          echo "FISH_BIN=$fish_bin" >> "$GITHUB_ENV"
       - run: $FISH_BIN --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
       - run: cargo build
       - run: $FISH_BIN -n shell/hashai.fish
