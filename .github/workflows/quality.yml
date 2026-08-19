@@ -19,8 +19,12 @@ jobs:
       - name: Install supported Bash and ShellCheck
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update
-            sudo apt-get install --yes shellcheck
+            if ! command -v shellcheck >/dev/null 2>&1; then
+              sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes shellcheck
+            fi
+            command -v bash
+            command -v shellcheck
+            shellcheck --version
             echo "BASH_BIN=$(command -v bash)" >> "$GITHUB_ENV"
           else
             brew install bash shellcheck
@@ -50,8 +54,11 @@ jobs:
       - name: Install supported Zsh
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update
-            sudo apt-get install --yes zsh
+            if ! command -v zsh >/dev/null 2>&1; then
+              sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes zsh
+            fi
+            command -v zsh
+            zsh --version
             echo "ZSH_BIN=$(command -v zsh)" >> "$GITHUB_ENV"
           else
             echo "ZSH_BIN=$(command -v zsh)" >> "$GITHUB_ENV"
