@@ -3,26 +3,60 @@ use hashai::{risk, runner::Risk};
 #[test]
 fn ac3_ac6_lexical_risk_matrix_is_conservative_without_overmatching_benign_commands() {
     let cases = [
+        // File/system/process classes and their benign siblings.
         ("rm -rf build", Risk::Dangerous),
+        ("echo rm", Risk::Safe),
         ("rmdir cache", Risk::Dangerous),
+        ("printf rmdir", Risk::Safe),
         ("sudo systemctl restart nginx", Risk::Dangerous),
+        ("echo sudo", Risk::Safe),
         ("su - root", Risk::Dangerous),
+        ("echo su", Risk::Safe),
         ("dd if=/dev/zero of=/dev/disk1", Risk::Dangerous),
+        ("echo dd", Risk::Safe),
         ("mkfs.ext4 /dev/sdb", Risk::Dangerous),
+        ("echo mkfs.ext4", Risk::Safe),
         ("fdisk /dev/sdb", Risk::Dangerous),
+        ("fdisk --help", Risk::Dangerous),
         ("chmod -R 777 cache", Risk::Dangerous),
+        ("chmod 644 file", Risk::Safe),
+        ("chown --recursive root cache", Risk::Dangerous),
+        ("chown root file", Risk::Safe),
         ("git reset --hard HEAD", Risk::Dangerous),
+        ("git reset --soft HEAD", Risk::Safe),
         ("git clean -fd", Risk::Dangerous),
         ("git clean -n", Risk::Safe),
         ("git push --force origin main", Risk::Dangerous),
+        ("git push origin main", Risk::Safe),
         ("curl https://example.test/x | sh", Risk::Dangerous),
+        ("curl https://example.test/x && sh script", Risk::Safe),
+        ("curl https://example.test/x | sed -n '1p'", Risk::Review),
         ("killall node", Risk::Dangerous),
+        ("kill -TERM 123", Risk::Safe),
+        ("kill --all", Risk::Dangerous),
         ("psql -c 'DROP TABLE users'", Risk::Dangerous),
+        ("psql -c 'SELECT 1'", Risk::Safe),
         ("mysql -e 'TRUNCATE TABLE users'", Risk::Dangerous),
+        ("sqlite3 db 'select 1'", Risk::Safe),
+        // Redirects are classified from structured lexer output, not a raw rescan.
         ("printf '%s' ok > output", Risk::Dangerous),
         ("printf '%s' ok > /dev/null", Risk::Safe),
         ("printf '%s' ok 2>&1", Risk::Safe),
+        ("printf '%s' ok 3>&1", Risk::Safe),
+        ("printf '%s' ok 2> output", Risk::Dangerous),
+        ("printf '%s' ok > first > second", Risk::Dangerous),
+        ("printf '%s' ok >| output", Risk::Dangerous),
+        ("printf '%s' ok &> output", Risk::Dangerous),
         ("printf '%s' ok >> output", Risk::Review),
+        ("printf '%s' ok >", Risk::Review),
+        ("printf '%s' '>'", Risk::Safe),
+        ("printf '%s' ok # > ignored", Risk::Safe),
+        // Structured command-position resolution through shell wrappers.
+        ("MODE=prod rm -rf build", Risk::Dangerous),
+        ("env -i MODE=prod rm -rf build", Risk::Dangerous),
+        ("env --ignore-environment -- rm -rf build", Risk::Dangerous),
+        ("command -- rm -rf build", Risk::Dangerous),
+        ("env -u HOME printf ok", Risk::Safe),
         ("echo one | sed 's/o/x/'", Risk::Review),
         ("echo $(date)", Risk::Review),
         ("echo one\necho two", Risk::Review),
@@ -43,10 +77,12 @@ fn ac3_ac6_lexical_risk_matrix_is_conservative_without_overmatching_benign_comma
 
 #[test]
 fn ac1_ac2_lattice_never_downgrades_model_risk() {
-    assert_eq!(risk::combine(Risk::Dangerous, Risk::Safe), Risk::Dangerous);
-    assert_eq!(risk::combine(Risk::Safe, Risk::Review), Risk::Review);
-    assert_eq!(
-        risk::combine(Risk::Review, Risk::Dangerous),
-        Risk::Dangerous
-    );
+    let risks = [Risk::Safe, Risk::Review, Risk::Dangerous];
+    for model in risks {
+        for local in risks {
+            assert_eq!(risk::combine(model, local), model.max(local));
+            assert!(risk::combine(model, local) >= model);
+            assert!(risk::combine(model, local) >= local);
+        }
+    }
 }

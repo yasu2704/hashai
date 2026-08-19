@@ -129,6 +129,35 @@ fn ac4_ac5_risk_warnings_are_unavoidable_and_keep_stdout_command_only() {
 }
 
 #[test]
+fn ac4_ac5_warning_suppression_attempts_do_not_execute_or_hide_a_dangerous_command() {
+    for (name, value) in [
+        ("HASHAI_NO_WARNINGS", "1"),
+        ("HASHAI_SUPPRESS_WARNINGS", "true"),
+        ("NO_COLOR", "1"),
+    ] {
+        let temp = TempDir::new().unwrap();
+        let execution_marker = temp.path().join("generated-command-was-executed");
+        let generated = format!("touch {}", shell_quote(&execution_marker));
+        let fake = fake_codex(
+            &temp,
+            &output_file_writer(&json_response(&generated, "dangerous")),
+        );
+
+        command_with(&temp, &fake)
+            .env(name, value)
+            .args(["generate", "--shell", "bash", "create a marker"])
+            .assert()
+            .success()
+            .stdout(format!("{generated}\n"))
+            .stderr("hashai: warning: generated command risk=dangerous; inspect carefully before execution\n");
+        assert!(
+            !execution_marker.exists(),
+            "generated command executed while testing {name} suppression attempt"
+        );
+    }
+}
+
+#[test]
 fn ac1_ac2_local_dangerous_risk_escalates_a_safe_model_without_rejection() {
     let temp = TempDir::new().unwrap();
     let fake = fake_codex(

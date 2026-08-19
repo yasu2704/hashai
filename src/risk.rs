@@ -9,66 +9,297 @@ pub fn combine(model: Risk, local: Risk) -> Risk {
 
 /// Classify syntax that can be recognized without executing or parsing a shell.
 pub fn analyze(command: &str) -> Risk {
-    let (tokens, uncertain) = lex(command);
-    let mut risk = if uncertain { Risk::Review } else { Risk::Safe };
-    if command.contains('\n') || command.contains("<<") || command.contains("<<<") {
+    let scan = scan(command);
+    let mut risk = if scan.uncertain {
+        Risk::Review
+    } else {
+        Risk::Safe
+    };
+    if matches!(
+        scan.lexemes.last(),
+        Some(Lexeme::Operator(
+            Operator::And | Operator::Or | Operator::Pipe | Operator::Background
+        ))
+    ) {
         risk = risk.max(Risk::Review);
     }
-    if tokens.iter().any(|token| token == "|" || token == "||") {
-        risk = risk.max(Risk::Review);
-    }
-    for (index, _) in tokens
-        .iter()
-        .enumerate()
-        .filter(|(_, token)| token.as_str() == "|")
-    {
-        let before = segment_program(&tokens[..index]);
-        let after = segment_program(&tokens[index + 1..]);
-        if matches!(before, Some("curl" | "wget"))
-            && matches!(after, Some("sh" | "bash" | "zsh" | "fish"))
-        {
-            risk = risk.max(Risk::Dangerous);
-        }
-    }
-    if command.contains("$(") || command.contains('`') {
-        risk = risk.max(Risk::Review);
-    }
-    if tokens
-        .last()
-        .is_some_and(|token| matches!(token.as_str(), ";" | "&&" | "||" | "|"))
-    {
-        risk = risk.max(Risk::Review);
-    }
-
-    let mut command_start = true;
-    let mut current = Vec::new();
-    for token in &tokens {
-        if matches!(token.as_str(), ";" | "&&" | "||" | "|" | "&") {
-            risk = risk.max(classify_words(&current));
-            current.clear();
-            command_start = true;
-        } else {
-            if command_start && matches!(token.as_str(), "rm" | "rmdir" | "sudo" | "su" | "dd") {
-                risk = risk.max(Risk::Dangerous);
+    let mut words = Vec::new();
+    let mut pipe_source = None;
+    for lexeme in &scan.lexemes {
+        match lexeme {
+            Lexeme::Word(word) => words.push(word.as_str()),
+            Lexeme::Redirect(redirect) => risk = risk.max(redirect.risk()),
+            Lexeme::Operator(operator) => {
+                risk = risk.max(classify_words(&words));
+                let program = executable(&words);
+                risk = risk.max(remote_execution_risk(pipe_source, program));
+                words.clear();
+                if matches!(operator, Operator::Pipe | Operator::Or) {
+                    risk = risk.max(Risk::Review);
+                }
+                pipe_source = matches!(operator, Operator::Pipe)
+                    .then_some(program)
+                    .flatten();
             }
-            current.push(token.as_str());
-            command_start = false;
         }
     }
-    risk.max(classify_words(&current))
-        .max(classify_redirects(command))
+    risk = risk.max(classify_words(&words));
+    risk = risk.max(remote_execution_risk(pipe_source, executable(&words)));
+    risk
+}
+
+fn remote_execution_risk(source: Option<&str>, target: Option<&str>) -> Risk {
+    if matches!(source, Some("curl" | "wget"))
+        && matches!(target, Some("sh" | "bash" | "zsh" | "fish"))
+    {
+        Risk::Dangerous
+    } else {
+        Risk::Safe
+    }
+}
+
+#[derive(Debug)]
+struct Scan {
+    lexemes: Vec<Lexeme>,
+    uncertain: bool,
+}
+#[derive(Debug)]
+enum Lexeme {
+    Word(String),
+    Operator(Operator),
+    Redirect(Redirect),
+}
+#[derive(Clone, Copy, Debug)]
+enum Operator {
+    Sequence,
+    And,
+    Or,
+    Pipe,
+    Background,
+}
+#[derive(Clone, Copy, Debug)]
+enum RedirectKind {
+    Truncate,
+    Append,
+    Input,
+    ReadWrite,
+    HereDoc,
+    HereString,
+    OutputDuplicate,
+    InputDuplicate,
+}
+#[derive(Debug)]
+struct Redirect {
+    kind: RedirectKind,
+    target: Option<String>,
+}
+
+impl Redirect {
+    fn risk(&self) -> Risk {
+        match self.kind {
+            RedirectKind::Truncate => match self.target.as_deref() {
+                Some("/dev/null") => Risk::Safe,
+                Some(_) => Risk::Dangerous,
+                None => Risk::Review,
+            },
+            RedirectKind::OutputDuplicate | RedirectKind::InputDuplicate => {
+                if self.target.is_some() {
+                    Risk::Safe
+                } else {
+                    Risk::Review
+                }
+            }
+            RedirectKind::Append
+            | RedirectKind::Input
+            | RedirectKind::ReadWrite
+            | RedirectKind::HereDoc
+            | RedirectKind::HereString => Risk::Review,
+        }
+    }
+}
+
+/// A single lexical pass. Redirect words are attached here, so analysis never
+/// rescans the original command text for redirection syntax.
+fn scan(input: &str) -> Scan {
+    let chars: Vec<char> = input.chars().collect();
+    let mut lexemes = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut uncertain = false;
+    let mut index = 0;
+    while index < chars.len() {
+        let current = chars[index];
+        if let Some(open_quote) = quote {
+            if current == open_quote {
+                quote = None;
+            } else {
+                word.push(current);
+            }
+            index += 1;
+            continue;
+        }
+        match current {
+            '\'' | '"' => quote = Some(current),
+            '#' if word.is_empty() => {
+                while index < chars.len() && chars[index] != '\n' {
+                    index += 1;
+                }
+                continue;
+            }
+            c if c.is_whitespace() => {
+                push_word(&mut lexemes, &mut word);
+                if c == '\n' {
+                    lexemes.push(Lexeme::Operator(Operator::Sequence));
+                    uncertain = true;
+                }
+            }
+            ';' => {
+                push_word(&mut lexemes, &mut word);
+                lexemes.push(Lexeme::Operator(Operator::Sequence));
+            }
+            '|' => {
+                push_word(&mut lexemes, &mut word);
+                if chars.get(index + 1) == Some(&'|') {
+                    lexemes.push(Lexeme::Operator(Operator::Or));
+                    index += 1;
+                } else {
+                    lexemes.push(Lexeme::Operator(Operator::Pipe));
+                }
+            }
+            '&' if chars.get(index + 1) == Some(&'>') => {
+                push_word(&mut lexemes, &mut word);
+                let (target, next) = redirect_target(&chars, index + 2);
+                lexemes.push(Lexeme::Redirect(Redirect {
+                    kind: RedirectKind::Truncate,
+                    target,
+                }));
+                index = next - 1;
+            }
+            '&' if chars.get(index + 1) == Some(&'&') => {
+                push_word(&mut lexemes, &mut word);
+                lexemes.push(Lexeme::Operator(Operator::And));
+                index += 1;
+            }
+            '&' => {
+                push_word(&mut lexemes, &mut word);
+                lexemes.push(Lexeme::Operator(Operator::Background));
+                uncertain = true;
+            }
+            '<' | '>' => {
+                let fd = word
+                    .chars()
+                    .all(|c| c.is_ascii_digit())
+                    .then(|| std::mem::take(&mut word));
+                if fd.is_none() {
+                    push_word(&mut lexemes, &mut word);
+                }
+                let (kind, end) = redirect_kind(&chars, index, current);
+                let (target, next) = redirect_target(&chars, end);
+                lexemes.push(Lexeme::Redirect(Redirect { kind, target }));
+                index = next - 1;
+            }
+            '$' if chars.get(index + 1) == Some(&'(') => {
+                uncertain = true;
+                word.push(current);
+            }
+            '`' | '(' | ')' | '{' | '}' | '\\' => {
+                uncertain = true;
+                word.push(current);
+            }
+            _ => word.push(current),
+        }
+        index += 1;
+    }
+    push_word(&mut lexemes, &mut word);
+    if quote.is_some() {
+        uncertain = true;
+    }
+    Scan { lexemes, uncertain }
+}
+
+fn redirect_kind(chars: &[char], index: usize, current: char) -> (RedirectKind, usize) {
+    let next = chars.get(index + 1).copied();
+    let kind = match (current, next) {
+        ('>', Some('>')) => RedirectKind::Append,
+        ('>', Some('|')) => RedirectKind::Truncate,
+        ('>', Some('&')) => RedirectKind::OutputDuplicate,
+        ('<', Some('&')) => RedirectKind::InputDuplicate,
+        ('<', Some('<')) if chars.get(index + 2) == Some(&'<') => RedirectKind::HereString,
+        ('<', Some('<')) => RedirectKind::HereDoc,
+        ('<', Some('>')) => RedirectKind::ReadWrite,
+        ('<', _) => RedirectKind::Input,
+        ('>', _) => RedirectKind::Truncate,
+        _ => unreachable!(),
+    };
+    let width = match (current, next) {
+        ('<', Some('<')) if chars.get(index + 2) == Some(&'<') => 3,
+        ('>' | '<', Some('>') | Some('<') | Some('|') | Some('&')) => 2,
+        _ => 1,
+    };
+    (kind, index + width)
+}
+
+fn redirect_target(chars: &[char], mut index: usize) -> (Option<String>, usize) {
+    while chars
+        .get(index)
+        .is_some_and(|c| c.is_whitespace() && *c != '\n')
+    {
+        index += 1;
+    }
+    let Some(first) = chars.get(index).copied() else {
+        return (None, index);
+    };
+    if matches!(first, '\n' | ';' | '|' | '&' | '<' | '>') {
+        return (None, index);
+    }
+    let mut target = String::new();
+    let mut quote = None;
+    while let Some(current) = chars.get(index).copied() {
+        if let Some(open_quote) = quote {
+            if current == open_quote {
+                quote = None;
+            } else {
+                target.push(current);
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(current, '\'' | '"') {
+            quote = Some(current);
+        } else if current.is_whitespace() || matches!(current, ';' | '|' | '&' | '<' | '>') {
+            break;
+        } else {
+            target.push(current);
+        }
+        index += 1;
+    }
+    if quote.is_some() || target.is_empty() {
+        (None, index)
+    } else {
+        (Some(target), index)
+    }
+}
+
+fn push_word(lexemes: &mut Vec<Lexeme>, word: &mut String) {
+    if !word.is_empty() {
+        lexemes.push(Lexeme::Word(std::mem::take(word)));
+    }
 }
 
 fn classify_words(words: &[&str]) -> Risk {
-    if words.is_empty() {
-        return Risk::Safe;
-    }
-    let offset = executable_offset(words);
-    let Some(program) = words.get(offset).copied() else {
-        return Risk::Review;
+    let Some(program) = executable(words) else {
+        return if words.is_empty() {
+            Risk::Safe
+        } else {
+            Risk::Review
+        };
     };
-    let words = &words[offset..];
-    if program.starts_with("mkfs") || matches!(program, "fdisk" | "sfdisk" | "killall" | "pkill") {
+    if program.starts_with("mkfs")
+        || matches!(
+            program,
+            "fdisk" | "sfdisk" | "killall" | "pkill" | "rm" | "rmdir" | "sudo" | "su" | "dd"
+        )
+    {
         return Risk::Dangerous;
     }
     if program == "parted"
@@ -92,19 +323,20 @@ fn classify_words(words: &[&str]) -> Risk {
     {
         return Risk::Dangerous;
     }
-    if program == "kill" && words.iter().any(|word| *word == "-1" || *word == "--all") {
+    if program == "kill" && words.iter().any(|word| matches!(*word, "-1" | "--all")) {
         return Risk::Dangerous;
     }
+    let program_at = executable_index(words);
     if program == "git" {
-        if words.get(1) == Some(&"reset") && words.contains(&"--hard") {
+        if words.get(program_at + 1) == Some(&"reset") && words.contains(&"--hard") {
             return Risk::Dangerous;
         }
-        if words.get(1) == Some(&"clean")
+        if words.get(program_at + 1) == Some(&"clean")
             && !words.iter().any(|word| matches!(*word, "-n" | "--dry-run"))
         {
             return Risk::Dangerous;
         }
-        if words.get(1) == Some(&"push")
+        if words.get(program_at + 1) == Some(&"push")
             && words.iter().any(|word| matches!(*word, "--force" | "-f"))
         {
             return Risk::Dangerous;
@@ -121,162 +353,70 @@ fn classify_words(words: &[&str]) -> Risk {
     Risk::Safe
 }
 
-fn executable_offset(words: &[&str]) -> usize {
+fn executable<'a>(words: &[&'a str]) -> Option<&'a str> {
+    words.get(executable_index(words)).copied()
+}
+fn executable_index(words: &[&str]) -> usize {
     let mut index = 0;
     while let Some(word) = words.get(index) {
-        if word.contains('=') && !word.starts_with('=') {
+        if is_assignment(word) {
             index += 1;
             continue;
         }
-        if *word == "env" || *word == "command" {
+        if *word == "env" {
             index += 1;
+            let mut options = true;
+            while let Some(argument) = words.get(index) {
+                if options && *argument == "--" {
+                    options = false;
+                    index += 1;
+                    continue;
+                }
+                if options && matches!(*argument, "-u" | "--unset") {
+                    index += 2;
+                    continue;
+                }
+                if options && argument.starts_with('-') {
+                    index += 1;
+                    continue;
+                }
+                if is_assignment(argument) {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            continue;
+        }
+        if *word == "command" {
+            index += 1;
+            while let Some(argument) = words.get(index) {
+                if *argument == "--" {
+                    index += 1;
+                    break;
+                }
+                if argument.starts_with('-') {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
             continue;
         }
         break;
     }
     index
 }
-
-fn segment_program(tokens: &[String]) -> Option<&str> {
-    let start = tokens
-        .iter()
-        .rposition(|word| matches!(word.as_str(), ";" | "&&" | "||" | "|" | "&"))
-        .map_or(0, |index| index + 1);
-    let words: Vec<&str> = tokens[start..].iter().map(String::as_str).collect();
-    tokens
-        .get(start + executable_offset(&words))
-        .map(String::as_str)
-}
-
-fn classify_redirects(command: &str) -> Risk {
-    let bytes = command.as_bytes();
-    let mut quote = None;
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if matches!(byte, b'\'' | b'"') {
-            if quote == Some(byte) {
-                quote = None;
-            } else if quote.is_none() {
-                quote = Some(byte);
-            }
-            index += 1;
-            continue;
-        }
-        if quote.is_none() && byte == b'<' {
-            return Risk::Review;
-        }
-        if quote.is_none() && byte == b'>' {
-            let rest = &command[index..];
-            if rest.starts_with(">&") {
-                index += 1;
-                continue;
-            }
-            let target = rest[1..].trim_start();
-            let target = target.strip_prefix('|').unwrap_or(target);
-            let target = target
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .or_else(|| {
-                    target
-                        .strip_prefix('\'')
-                        .and_then(|value| value.strip_suffix('\''))
-                })
-                .unwrap_or(target);
-            if target == "/dev/null" {
-                index += 1;
-                continue;
-            }
-            if rest.starts_with(">>") {
-                return Risk::Review;
-            }
-            if rest[1..].trim().is_empty() {
-                return Risk::Review;
-            }
-            return Risk::Dangerous;
-        }
-        index += 1;
-    }
-    Risk::Safe
-}
-
-fn lex(input: &str) -> (Vec<String>, bool) {
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    let mut quote = None;
-    let mut uncertain = false;
-    let chars: Vec<char> = input.chars().collect();
-    let mut index = 0;
-    while index < chars.len() {
-        let current = chars[index];
-        if matches!(current, '\'' | '"') {
-            if quote == Some(current) {
-                quote = None;
-            } else if quote.is_none() {
-                quote = Some(current);
+fn is_assignment(word: &str) -> bool {
+    let Some((name, _)) = word.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.chars().enumerate().all(|(i, c)| {
+            if i == 0 {
+                c == '_' || c.is_ascii_alphabetic()
             } else {
-                token.push(current);
+                c == '_' || c.is_ascii_alphanumeric()
             }
-        } else if quote.is_none() && current == '#' && token.is_empty() {
-            while index < chars.len() && chars[index] != '\n' {
-                index += 1;
-            }
-            if tokens.last().is_none_or(|token| token != ";") {
-                tokens.push(";".to_owned());
-            }
-            continue;
-        } else if quote.is_none() && current == '\n' {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            tokens.push(";".to_owned());
-            uncertain = true;
-        } else if quote.is_none() && current.is_whitespace() {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-        } else if quote.is_none() && current == ';' {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            tokens.push(";".to_owned());
-        } else if quote.is_none() && current == '|' {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            if chars.get(index + 1) == Some(&'|') {
-                tokens.push("||".to_owned());
-                index += 1;
-            } else {
-                tokens.push("|".to_owned());
-            }
-        } else if quote.is_none() && current == '&' && index > 0 && chars[index - 1] == '>' {
-            token.push(current);
-        } else if quote.is_none() && current == '&' && chars.get(index + 1) == Some(&'&') {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            tokens.push("&&".to_owned());
-            index += 1;
-        } else if quote.is_none() && current == '&' {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            tokens.push("&".to_owned());
-            uncertain = true;
-        } else if quote.is_none() && matches!(current, '(' | ')' | '{' | '}' | '\\') {
-            uncertain = true;
-            token.push(current);
-        } else {
-            token.push(current);
-        }
-        index += 1;
-    }
-    if !token.is_empty() {
-        tokens.push(token);
-    }
-    if quote.is_some() {
-        uncertain = true;
-    }
-    (tokens, uncertain)
+        })
 }
