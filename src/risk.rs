@@ -125,10 +125,26 @@ fn scan(input: &str) -> Scan {
     let mut lexemes = Vec::new();
     let mut word = String::new();
     let mut quote = None;
+    let mut escaped = false;
     let mut uncertain = false;
     let mut index = 0;
     while index < chars.len() {
         let current = chars[index];
+        if escaped {
+            word.push(current);
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if current == '\\' {
+            // Preserve the escaped character in the current word. In
+            // particular, it must not be reconsidered as an operator,
+            // comment marker, or quote delimiter on the next iteration.
+            escaped = true;
+            uncertain = true;
+            index += 1;
+            continue;
+        }
         if let Some(open_quote) = quote {
             if current == open_quote {
                 quote = None;
@@ -202,7 +218,7 @@ fn scan(input: &str) -> Scan {
                 uncertain = true;
                 word.push(current);
             }
-            '`' | '(' | ')' | '{' | '}' | '\\' => {
+            '`' | '(' | ')' | '{' | '}' => {
                 uncertain = true;
                 word.push(current);
             }
@@ -211,7 +227,7 @@ fn scan(input: &str) -> Scan {
         index += 1;
     }
     push_word(&mut lexemes, &mut word);
-    if quote.is_some() {
+    if quote.is_some() || escaped {
         uncertain = true;
     }
     Scan { lexemes, uncertain }
@@ -297,7 +313,16 @@ fn classify_words(words: &[&str]) -> Risk {
     if program.starts_with("mkfs")
         || matches!(
             program,
-            "fdisk" | "sfdisk" | "killall" | "pkill" | "rm" | "rmdir" | "sudo" | "su" | "dd"
+            "fdisk"
+                | "sfdisk"
+                | "cfdisk"
+                | "killall"
+                | "pkill"
+                | "rm"
+                | "rmdir"
+                | "sudo"
+                | "su"
+                | "dd"
         )
     {
         return Risk::Dangerous;
@@ -343,14 +368,63 @@ fn classify_words(words: &[&str]) -> Risk {
         }
     }
     if matches!(program, "psql" | "mysql" | "sqlite3" | "sqlcmd")
-        && words
-            .iter()
-            .flat_map(|word| word.split_whitespace())
-            .any(|word| matches!(word, "DROP" | "drop" | "TRUNCATE" | "truncate"))
+        && words.iter().any(|word| sql_contains_destructive(word))
     {
         return Risk::Dangerous;
     }
     Risk::Safe
+}
+
+fn sql_contains_destructive(sql: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"--") {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            index += 2;
+            while index + 1 < bytes.len() && !bytes[index..].starts_with(b"*/") {
+                index += 1;
+            }
+            index = (index + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[index] == b'\'' {
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\'') {
+                        index += 2;
+                    } else {
+                        index += 1;
+                        break;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+            index += 1;
+        }
+        if index > start
+            && (bytes[start..index].eq_ignore_ascii_case(b"drop")
+                || bytes[start..index].eq_ignore_ascii_case(b"truncate"))
+        {
+            return true;
+        }
+        if index == start {
+            index += 1;
+        }
+    }
+    false
 }
 
 fn executable<'a>(words: &[&'a str]) -> Option<&'a str> {
