@@ -83,7 +83,10 @@ EOF
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"
     grep -F '__hashai_zsh_replace_buffer' "$binding.emacs" >/dev/null
     grep -F '__hashai_zsh_replace_buffer' "$binding.viins" >/dev/null
-    printf '%s\n%s\n%s\n%s\n' "$buffer" "$cursor" "$request" "$test_dir/tty.log"
+    TTY_BUFFER=$buffer
+    TTY_CURSOR=$cursor
+    TTY_REQUEST=$request
+    TTY_LOG="$test_dir/tty.log"
 }
 
 run_binding_dispatch() {
@@ -95,7 +98,7 @@ run_binding_dispatch() {
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER='# ' \
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/dispatch.log"
-    printf '%s\n' "$request"
+    DISPATCH_REQUEST=$request
 }
 
 run_noninteractive() {
@@ -105,7 +108,8 @@ run_noninteractive() {
         HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" "$HASHAI_ZSH_BIN" -f -c \
         "source '$artifact'; BUFFER=\"\$1\"; CURSOR=5; __hashai_zsh_replace_buffer; print -rn -- \"\$BUFFER\" >'$result'" \
         -- "$line"
-    printf '%s\n%s\n' "$result" "$request"
+    NONINTERACTIVE_BUFFER=$result
+    NONINTERACTIVE_REQUEST=$request
 }
 
 run_interactive_non_tty() {
@@ -118,87 +122,87 @@ BUFFER='# interactive non-tty'
 CURSOR=5
 __hashai_zsh_replace_buffer
 EOF
-    printf '%s\n' "$request"
+    INTERACTIVE_NON_TTY_REQUEST=$request
 }
 
 original=$'# 日本語 😀  \'quoted\'  $(echo no) !  whitespace '
 success_line="printf '日本語 😀  spaced'"
 success_point=${#success_line}
-mapfile -t files < <(run_tty "$artifact" success "$original" 5 e '# ')
+run_tty "$artifact" success "$original" 5 e '# '
 printf '%s' "$success_line" >"$test_dir/expected-success-buffer"
 printf '%s\n' "$success_point" >"$test_dir/expected-success-cursor"
-assert_file_equals "$test_dir/expected-success-buffer" "${files[0]}"
-assert_file_equals "$test_dir/expected-success-cursor" "${files[1]}"
+assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
+assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
 printf '%s' "${original#"# "}" >"$test_dir/expected-request"
-assert_file_equals "$test_dir/expected-request" "${files[2]}"
+assert_file_equals "$test_dir/expected-request" "$TTY_REQUEST"
 
 # Literal Ctrl+G reaches the installed widget. Ctrl+U clears the replacement
 # rather than Enter executing it, so the fake Core's touch must not run.
 printf '%s' 'dispatch 日本語 😀' >"$test_dir/expected-dispatch-request"
-mapfile -t files < <(run_binding_dispatch)
-assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
+run_binding_dispatch
+assert_file_equals "$test_dir/expected-dispatch-request" "$DISPATCH_REQUEST"
 test ! -e "$test_dir/autoexecuted"
 
 multiline_line=$'printf \'first\'\nprintf \'日本語 😀\'\n'
 multiline_point=${#multiline_line}
-mapfile -t files < <(run_tty "$artifact" multiline "$original" 5 e '# ')
+run_tty "$artifact" multiline "$original" 5 e '# '
 printf '%s' "$multiline_line" >"$test_dir/expected-multiline-buffer"
 printf '%s\n' "$multiline_point" >"$test_dir/expected-multiline-cursor"
-assert_file_equals "$test_dir/expected-multiline-buffer" "${files[0]}"
-assert_file_equals "$test_dir/expected-multiline-cursor" "${files[1]}"
+assert_file_equals "$test_dir/expected-multiline-buffer" "$TTY_BUFFER"
+assert_file_equals "$test_dir/expected-multiline-cursor" "$TTY_CURSOR"
 
 # AC-1: non-matching input must never reach Core.
-mapfile -t files < <(run_tty "$artifact" success 'echo untouched' 3 e '# ')
+run_tty "$artifact" success 'echo untouched' 3 e '# '
 printf '%s' 'echo untouched' >"$test_dir/expected-untouched-buffer"
 printf '%s\n' 3 >"$test_dir/expected-untouched-cursor"
-assert_file_equals "$test_dir/expected-untouched-buffer" "${files[0]}"
-assert_file_equals "$test_dir/expected-untouched-cursor" "${files[1]}"
-test ! -s "${files[2]}"
+assert_file_equals "$test_dir/expected-untouched-buffer" "$TTY_BUFFER"
+assert_file_equals "$test_dir/expected-untouched-cursor" "$TTY_CURSOR"
+test ! -s "$TTY_REQUEST"
 
 # AC-3: errors, timeout, cancellation, and empty output preserve buffer and cursor.
 for mode in failure timeout cancel empty; do
-    mapfile -t files < <(run_tty "$artifact" "$mode" "$original" 5 e '# ')
+    run_tty "$artifact" "$mode" "$original" 5 e '# '
     printf '%s' "$original" >"$test_dir/expected-preserved-buffer"
     printf '%s\n' 5 >"$test_dir/expected-preserved-cursor"
-    assert_file_equals "$test_dir/expected-preserved-buffer" "${files[0]}"
-    assert_file_equals "$test_dir/expected-preserved-cursor" "${files[1]}"
+    assert_file_equals "$test_dir/expected-preserved-buffer" "$TTY_BUFFER"
+    assert_file_equals "$test_dir/expected-preserved-cursor" "$TTY_CURSOR"
     if [[ $mode != empty ]]; then
-        grep -F 'hashai: command generation failed; input preserved' "${files[3]}" >/dev/null
+        grep -F 'hashai: command generation failed; input preserved' "$TTY_LOG" >/dev/null
     fi
 done
 
 # AC-5: neither noninteractive nor interactive non-TTY sourcing can call Core.
-mapfile -t files < <(run_noninteractive "$original")
+run_noninteractive "$original"
 printf '%s' "$original" >"$test_dir/expected-non-tty"
-assert_file_equals "$test_dir/expected-non-tty" "${files[0]}"
-test ! -s "${files[1]}"
-mapfile -t files < <(run_interactive_non_tty)
-test ! -s "${files[0]}"
+assert_file_equals "$test_dir/expected-non-tty" "$NONINTERACTIVE_BUFFER"
+test ! -s "$NONINTERACTIVE_REQUEST"
+run_interactive_non_tty
+test ! -s "$INTERACTIVE_NON_TTY_REQUEST"
 
 # AC-7: a trigger seam may change without regenerating the artifact.
-mapfile -t files < <(run_tty "$artifact" success ',, 日本語 😀' 2 e ',, ')
-assert_file_equals "$test_dir/expected-success-buffer" "${files[0]}"
+run_tty "$artifact" success ',, 日本語 😀' 2 e ',, '
+assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
 
 # The installed Ctrl+G binding is also active in vi insert mode. The cursor
 # begins in the middle of a UTF-8 buffer and reaches the command end only on success.
-mapfile -t files < <(run_tty "$artifact" success "$original" 5 v '# ')
-assert_file_equals "$test_dir/expected-success-buffer" "${files[0]}"
-assert_file_equals "$test_dir/expected-success-cursor" "${files[1]}"
+run_tty "$artifact" success "$original" 5 v '# '
+assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
+assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
 
 # AC-8: structural success and failure mutations are caught by the same oracles.
 mutated="$test_dir/hashai.mutated.zsh"
 sed 's/BUFFER=$command/BUFFER=corrupted/' "$artifact" >"$mutated"
-mapfile -t files < <(run_tty "$mutated" success "$original" 5 e '# ')
-if cmp -s "$test_dir/expected-success-buffer" "${files[0]}"; then
+run_tty "$mutated" success "$original" 5 e '# '
+if cmp -s "$test_dir/expected-success-buffer" "$TTY_BUFFER"; then
     printf 'success-path mutation was not detected\n' >&2
     exit 1
 fi
 
 failure_mutated="$test_dir/hashai.failure-mutated.zsh"
 sed 's/return 0/BUFFER=corrupted; CURSOR=0; return 0/' "$artifact" >"$failure_mutated"
-mapfile -t files < <(run_tty "$failure_mutated" failure "$original" 5 e '# ')
-if cmp -s "$test_dir/expected-preserved-buffer" "${files[0]}"; then
-    if cmp -s "$test_dir/expected-preserved-cursor" "${files[1]}"; then
+run_tty "$failure_mutated" failure "$original" 5 e '# '
+if cmp -s "$test_dir/expected-preserved-buffer" "$TTY_BUFFER"; then
+    if cmp -s "$test_dir/expected-preserved-cursor" "$TTY_CURSOR"; then
         printf 'failure-path mutation was not detected\n' >&2
         exit 1
     fi
