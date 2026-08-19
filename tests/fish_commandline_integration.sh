@@ -5,7 +5,7 @@ set -euo pipefail
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data"
 "$HASHAI_BIN" integration generate --shell fish >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
 mkdir "$d/bin"
-printf '%s\n' '#!/usr/bin/env bash' 'printf "%s" "${5-}" >"$HASHAI_REQUEST_FILE"' "case \${HASHAI_TEST_MODE:-success} in success) printf '%s\\n' \"printf '日本語 😀  spaced'\";; multiline) printf '%s' \$'printf first\\nprintf 日本語 😀\\n\\n';; noauto) printf 'touch -- %q\\n' \"\$HASHAI_AUTOEXEC_MARKER\";; empty) :;; malformed) printf malformed;; failure|timeout|cancel) printf fake-failure >&2; exit 6;; esac" >"$d/bin/hashai"; chmod +x "$d/bin/hashai"
+printf '%s\n' '#!/usr/bin/env bash' 'test "$#" -eq 5' 'test "$1" = generate' 'test "$2" = --shell' 'test "$3" = fish' 'test "$4" = --' 'printf "%s" "${5-}" >"$HASHAI_REQUEST_FILE"' "case \${HASHAI_TEST_MODE:-success} in success) printf '%s\\n' \"printf '日本語 😀  spaced'\";; multiline) printf '%s' \$'printf first\\nprintf 日本語 😀\\n\\n';; noauto) printf 'touch -- %q\\n' \"\$HASHAI_AUTOEXEC_MARKER\";; empty) :;; malformed) printf malformed;; failure|timeout|cancel) printf fake-failure >&2; exit 6;; esac" >"$d/bin/hashai"; chmod +x "$d/bin/hashai"
 run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local length moves=; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; cat >"$d/cmd" <<EOF
 bind -M $map \\cg __hashai_fish_replace_buffer
 source '$artifact'
@@ -33,6 +33,13 @@ run success ',, 日本語 😀' 2 default ',, '; printf '%s' "printf '日本語 
 # AC-5: sourcing noninteractive or interactive-without-a-TTY never invokes Core.
 : >"$d/request"
 PATH="$d/bin:$PATH" HASHAI_REQUEST_FILE="$d/request" "$HASHAI_FISH_BIN" --no-config -c "source '$a'"
+test ! -s "$d/request"
+: >"$d/request"
+PATH="$d/bin:$PATH" HASHAI_REQUEST_FILE="$d/request" "$HASHAI_FISH_BIN" --no-config --interactive <<EOF >/dev/null 2>&1
+source '$a'
+set -g __hashai_fish_enabled 0
+__hashai_fish_replace_buffer
+EOF
 test ! -s "$d/request"
 mutated="$d/hashai.success-mutated.fish"
 sed 's/commandline --replace -- "\$generated"/commandline --replace -- corrupted/' "$a" >"$mutated"

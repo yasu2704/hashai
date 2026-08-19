@@ -88,6 +88,7 @@ jobs:
       - run: $FISH_BIN --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
       - run: cargo build
       - run: $FISH_BIN -n shell/hashai.fish
+      - run: HASHAI_FISH_BIN=$FISH_BIN python3 -m unittest tests/fish_pty_test.py
       - run: HASHAI_BIN=target/debug/hashai HASHAI_FISH_BIN=$FISH_BIN bash tests/fish_commandline_integration.sh
 
   quality:

@@ -12,10 +12,15 @@ def wait_marker(fd, marker):
     while time.monotonic() < deadline:
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096); sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
-            combined = tail + data
-            if marker in combined: return
-            tail = combined[-(len(marker)-1):]
+            seen, tail = marker_seen(tail, data, marker)
+            if seen: return
     raise RuntimeError("Fish did not emit readiness marker")
+
+def marker_seen(tail, data, marker):
+    combined = tail + data
+    if marker in combined:
+        return True, b""
+    return False, combined[-(len(marker)-1):]
 
 def main():
     groups = open(sys.argv[1], "rb").read().split(b"\0")
