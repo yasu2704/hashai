@@ -1,35 +1,42 @@
 #!/usr/bin/env python3
 """Run Fish command groups through a real PTY with marker synchronization."""
-import fcntl, os, pty, select, signal, subprocess, sys, termios, time
+import fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
+
+class ProbeResponder:
+    """Return deterministic replies for Fish's startup terminal probes."""
+    def __init__(self): self.tail = b""; self.replied = set()
+    def responses(self, data):
+        combined = self.tail + data; replies = []
+        def once(key, reply):
+            if key not in self.replied: replies.append(reply); self.replied.add(key)
+        if b"\x1b[c" in combined or b"\x1b[0c" in combined:
+            once(b"da", b"\x1b[?1;2c")
+        if b"\x1b[?u" in combined:
+            once(b"kitty", b"\x1b[?0u")
+        if b"\x1b]11;?" in combined:
+            once(b"osc11", b"\x1b]11;rgb:0000/0000/0000\x1b\\")
+        if b"\x1b[>0q" in combined:
+            once(b"version", b"\x1bP>|hashai\x1b\\")
+        for payload in re.findall(rb"\x1bP\+q(.*?)\x1b\\", combined):
+            once(b"xt" + payload, b"\x1bP0+r" + payload + b"\x1b\\")
+        self.tail = combined[-256:]
+        return replies
 
 def terminal_responses(data):
-    """Return deterministic replies for Fish's startup terminal probes."""
-    replies = []
-    if b"\x1b[c" in data:
-        replies.append(b"\x1b[?1;2c")
-    if b"\x1b[?u" in data:
-        replies.append(b"\x1b[?0u")
-    if b"\x1b]11;?" in data:
-        replies.append(b"\x1b]11;rgb:0000/0000/0000\x1b\\")
-    if b"\x1b[>q" in data:
-        replies.append(b"\x1b[>0;0;0c")
-    # XTGETTCAP requests carry a DCS payload; explicit failure is stable and
-    # lets Fish fall back without waiting for a terminal response.
-    if b"\x1bP+q" in data:
-        replies.append(b"\x1bP0+r\x1b\\")
-    return replies
+    """Compatibility helper for unit callers with one complete chunk."""
+    return ProbeResponder().responses(data)
 
 def write_all(fd, data):
     while data:
         count = os.write(fd, data)
         data = data[count:]
 
-def wait_marker(fd, marker):
+def wait_marker(fd, marker, responder):
     tail = b""; deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096)
-            for reply in terminal_responses(data): write_all(fd, reply)
+            for reply in responder.responses(data): write_all(fd, reply)
             sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
             seen, tail = marker_seen(tail, data, marker)
             if seen: return
@@ -44,6 +51,7 @@ def marker_seen(tail, data, marker):
 def main():
     groups = open(sys.argv[1], "rb").read().split(b"\0")
     master, slave = pty.openpty()
+    responder = ProbeResponder()
     def controlling_tty():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
@@ -52,14 +60,14 @@ def main():
     try:
         for index, group in enumerate(groups):
             write_all(master, group)
-            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__")
+            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder)
         deadline=time.monotonic()+10
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
             if select.select([master], [], [], .1)[0]:
                 try:
                     data = os.read(master,4096)
-                    for reply in terminal_responses(data): write_all(master, reply)
+                    for reply in responder.responses(data): write_all(master, reply)
                     sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
                 except OSError: pass
         return proc.wait()

@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from fish_pty import marker_seen, terminal_responses
+from fish_pty import ProbeResponder, marker_seen, terminal_responses
 
 class MarkerTests(unittest.TestCase):
     marker = b"__HASHAI_FISH_READY__"
@@ -35,8 +35,16 @@ class MarkerTests(unittest.TestCase):
         self.assertIn("fish", pathlib.Path(fish).name)
 
     def test_terminal_probe_replies_are_deterministic(self):
-        replies = terminal_responses(b"\x1b[c\x1b[?u\x1b]11;?\x1b\\\x1b[>q")
-        self.assertEqual(replies, [b"\x1b[?1;2c", b"\x1b[?0u", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1b[>0;0;0c"])
+        stream = b"\x1b[0c\x1b[?u\x1b]11;?\x1b\\\x1b[>0q\x1bP+q696e646e\x1b\\"
+        replies = terminal_responses(stream)
+        self.assertEqual(replies, [b"\x1b[?1;2c", b"\x1b[?0u", b"\x1b]11;rgb:0000/0000/0000\x1b\\", b"\x1bP>|hashai\x1b\\", b"\x1bP0+r696e646e\x1b\\"])
+
+    def test_split_probe_replies_once(self):
+        stream = b"\x1b[0c\x1bP+q696e646e\x1b\\"
+        for point in range(len(stream) + 1):
+            responder = ProbeResponder()
+            actual = responder.responses(stream[:point]) + responder.responses(stream[point:])
+            self.assertEqual(actual, [b"\x1b[?1;2c", b"\x1bP0+r696e646e\x1b\\"])
 
     def test_terminal_replies_do_not_satisfy_marker(self):
         data = b"".join(terminal_responses(b"\x1b[c"))
