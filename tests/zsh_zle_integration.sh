@@ -118,7 +118,7 @@ function __hashai_zsh_replace_buffer() {
 }
 EOF
     if [[ $expect_binding == no ]]; then
-        printf "bindkey '^Y' __hashai_zsh_replace_buffer\n" >>"$setup"
+        printf "zle -N __hashai_zsh_replace_buffer\nbindkey '^Y' __hashai_zsh_replace_buffer\n" >>"$setup"
     fi
     printf "source '%s'\n%s\n\0" "$setup" "$readiness_command" >"$commands"
     if [[ -n $load_from_file ]]; then
