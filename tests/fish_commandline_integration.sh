@@ -50,6 +50,19 @@ original=$HASHAI_CONTRACT_FISH_EXPOSED_REQUEST
 # The generated artifact bakes `@@ `/Ctrl-X; `run` supplies a `# ` runtime
 # trigger and sends literal Ctrl-X, proving the enabled compatibility override.
 run success "$original" 5 default; printf '%s' "$HASHAI_CONTRACT_SUCCESS" >"$d/expected"; cmp "$d/expected" "$d/buffer"; "$HASHAI_FISH_BIN" -c "string length -- \"$HASHAI_CONTRACT_SUCCESS\"" >"$d/cursor-expected"; cmp "$d/cursor-expected" "$d/cursor"; tail -c +3 "$d/exposed" >"$d/expected-request"; cmp "$d/expected-request" "$d/request"
+# AC-1/AC-5: review and dangerous stderr warnings are visible through the
+# real Fish PTY while command replacement, cursor, request, and no-auto hold.
+for mode in review dangerous; do
+    run "$mode" "$original" 5 default
+    cmp "$d/expected" "$d/buffer"
+    cmp "$d/cursor-expected" "$d/cursor"
+    cmp "$d/expected-request" "$d/request"
+    case $mode in
+        review) grep -F "$HASHAI_CONTRACT_REVIEW_WARNING" "$d/log" >/dev/null ;;
+        dangerous) grep -F "$HASHAI_CONTRACT_DANGEROUS_WARNING" "$d/log" >/dev/null ;;
+    esac
+    test ! -e "$d/auto"
+done
 # Fish owns editor normalization before this contract boundary; request bytes
 # are compared to the captured exposed buffer above.
 run success __NORMALIZED_MULTILINE__ 0 default; printf '%s' $'# first natural language\n日本語 😀 second line' >"$d/expected-exposed"; cmp "$d/expected-exposed" "$d/exposed"; printf '%s' $'first natural language\n日本語 😀 second line' >"$d/expected-request"; cmp "$d/expected-request" "$d/request"

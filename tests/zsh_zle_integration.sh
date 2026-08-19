@@ -219,6 +219,20 @@ assert_file_equals "$test_dir/expected-request" "$TTY_REQUEST"
 # retained the canonical tab-containing bytes exactly in ZLE's BUFFER.
 assert_file_equals "$canonical_request" "$TTY_SETUP_BUFFER"
 
+# AC-1/AC-5: stderr risk warnings survive the real ZLE PTY dispatch without
+# changing the replacement/cursor/request contract or executing the command.
+for mode in review dangerous; do
+    run_tty "$artifact" "$mode" "$original" 5 e '# '
+    assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
+    assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
+    assert_file_equals "$test_dir/expected-request" "$TTY_REQUEST"
+    case $mode in
+        review) grep -F "$HASHAI_CONTRACT_REVIEW_WARNING" "$TTY_LOG" >/dev/null ;;
+        dangerous) grep -F "$HASHAI_CONTRACT_DANGEROUS_WARNING" "$TTY_LOG" >/dev/null ;;
+    esac
+    test ! -e "$test_dir/autoexecuted"
+done
+
 # Literal Ctrl+X reaches the installed widget. Ctrl+U clears the replacement
 # rather than Enter executing it, so the fake Core's touch must not run.
 printf '%s' 'dispatch 日本語 😀' >"$test_dir/expected-dispatch-request"
