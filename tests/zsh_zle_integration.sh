@@ -47,6 +47,16 @@ chmod +x "$fake_bin/hashai"
 assert_file_equals() {
     local expected=$1 actual=$2
     if ! cmp -s "$expected" "$actual"; then
+        if [[ -n ${TTY_BINDING_EMACS:-} ]]; then
+            printf '%s\n' 'Zsh emacs Ctrl-G binding:' >&2
+            cat "$TTY_BINDING_EMACS" >&2
+            printf '%s\n' 'Zsh viins Ctrl-G binding:' >&2
+            cat "$TTY_BINDING_VIINS" >&2
+            printf '%s\n' 'Fake Core request bytes:' >&2
+            wc -c <"$TTY_REQUEST" >&2
+            printf '%s\n' 'Fake Core request:' >&2
+            cat "$TTY_REQUEST" >&2
+        fi
         if [[ -n ${TTY_LOG:-} && -f $TTY_LOG ]]; then
             printf '%s\n' 'Zsh PTY log follows:' >&2
             cat "$TTY_LOG" >&2
@@ -106,6 +116,8 @@ EOF
     TTY_CURSOR=$cursor
     TTY_REQUEST=$request
     TTY_LOG="$test_dir/tty.log"
+    TTY_BINDING_EMACS="$binding.emacs"
+    TTY_BINDING_VIINS="$binding.viins"
 }
 
 run_binding_dispatch() {
