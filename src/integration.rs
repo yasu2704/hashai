@@ -23,6 +23,7 @@ pub const ARTIFACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const VERSION_MARKER: &str = "# hashai-integration-version: ";
 const BASH_INTEGRATION: &str = include_str!("../shell/hashai.bash");
 const ZSH_INTEGRATION: &str = include_str!("../shell/hashai.zsh");
+const FISH_INTEGRATION: &str = include_str!("../shell/hashai.fish");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WriteOutcome {
@@ -334,7 +335,8 @@ fn artifact_contents(shell: &Shell) -> String {
     match shell {
         Shell::Bash => format!("{header}{BASH_INTEGRATION}"),
         Shell::Zsh => format!("{header}{ZSH_INTEGRATION}"),
-        Shell::Fish | Shell::Auto => format!(
+        Shell::Fish => format!("{header}{FISH_INTEGRATION}"),
+        Shell::Auto => format!(
             "{header}# Shell editor bindings are installed by the shell-specific integration phase.\n"
         ),
     }

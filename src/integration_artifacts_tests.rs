@@ -49,7 +49,15 @@ fn ac1_generate_writes_a_versioned_static_artifact_for_every_shell() {
                 assert!(contents.contains("hashai generate --shell zsh --"));
                 assert!(!contents.contains("eval"));
             }
-            Shell::Fish | Shell::Auto => {
+            Shell::Fish => {
+                assert!(contents.contains("__hashai_fish_replace_buffer"));
+                assert!(contents.contains("__hashai_fish_enabled"));
+                assert!(contents.contains("bind --mode default \\cg"));
+                assert!(contents.contains("bind --mode insert \\cg"));
+                assert!(contents.contains("hashai generate --shell fish --"));
+                assert!(!contents.contains("eval"));
+            }
+            Shell::Auto => {
                 assert!(is_comments_only(&contents), "{}", artifact.display());
             }
         }
