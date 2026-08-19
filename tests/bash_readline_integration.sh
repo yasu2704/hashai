@@ -21,9 +21,15 @@ artifact="$XDG_DATA_HOME/hashai/integrations/hashai.bash"
 # Artifact rendering must remain parseable for every supported trigger shape.
 # This runs the public generator, not a template-only helper.
 # shellcheck disable=SC1003,SC2016 # literal quote/substitution corpus values
-for corpus_trigger in "'" '"' '\\' '$(echo marker)' '`echo marker`' ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
+injection_marker="$test_dir/trigger-injection"
+for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
     "$HASHAI_BIN" integration generate --shell bash --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_BASH_BIN" -n "$artifact"
+    printf '%s' "$corpus_trigger" >"$test_dir/expected-trigger"
+    env -u HASHAI_TRIGGER "$HASHAI_BASH_BIN" --noprofile --norc -c \
+        'source "$1"; printf %s "$__hashai_bash_trigger"' _ "$artifact" >"$test_dir/actual-trigger"
+    cmp -s "$test_dir/expected-trigger" "$test_dir/actual-trigger"
+    test ! -e "$injection_marker"
 done
 "$HASHAI_BIN" integration generate --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
 

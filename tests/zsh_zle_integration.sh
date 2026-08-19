@@ -25,9 +25,15 @@ export XDG_DATA_HOME="$test_dir/data"
 "$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
 # shellcheck disable=SC1003,SC2016 # literal quote/substitution corpus values
-for corpus_trigger in "'" '"' '\\' '$(echo marker)' '`echo marker`' ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
+injection_marker="$test_dir/trigger-injection"
+for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
     "$HASHAI_BIN" integration generate --shell zsh --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_ZSH_BIN" -n "$artifact"
+    printf '%s' "$corpus_trigger" >"$test_dir/expected-trigger"
+    env -u HASHAI_TRIGGER "$HASHAI_ZSH_BIN" -dfc \
+        'source "$1"; print -rn -- "$__hashai_zsh_trigger"' _ "$artifact" >"$test_dir/actual-trigger"
+    cmp -s "$test_dir/expected-trigger" "$test_dir/actual-trigger"
+    test ! -e "$injection_marker"
 done
 "$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 # The emitted marker must not appear verbatim in setup input: a terminal echoes
@@ -109,15 +115,18 @@ function __hashai_zsh_replace_buffer() {
     print -u2 -r -- '__HASHAI_PTY_''READY__'
 }
 EOF
+    if [[ $expect_binding == no ]]; then
+        printf "bindkey '^Y' __hashai_zsh_replace_buffer\n" >>"$setup"
+    fi
     printf "source '%s'\n%s\n\0" "$setup" "$readiness_command" >"$commands"
     if [[ -n $load_from_file ]]; then
         # Ctrl-Y is a test-only setup widget. It loads the canonical bytes,
         # including Tab, then literal Ctrl-G invokes the installed artifact.
         printf '\031\0\030\0\024' >>"$commands"
     elif [[ $expect_binding == no ]]; then
-        # In a disabled artifact, unbound Ctrl-X remains ZLE's prefix. Escape
-        # completes that prefix before the independent Ctrl-T capture widget.
-        printf '%s%s\030\033\024' "$line" "$left_moves" >>"$commands"
+        # Invoke the real guarded production widget through a test-only key;
+        # never depend on platform-specific behavior for an unbound Ctrl-X.
+        printf '%s%s\031\0\024' "$line" "$left_moves" >>"$commands"
     else
         printf '%s%s\030\0\024' "$line" "$left_moves" >>"$commands"
     fi

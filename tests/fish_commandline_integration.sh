@@ -6,9 +6,15 @@ source tests/shell_contract_cases.sh
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data"
 "$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
 # shellcheck disable=SC1003,SC2016 # literal quote/substitution corpus values
-for corpus_trigger in "'" '"' '\\' '$(echo marker)' '`echo marker`' ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
+injection_marker="$d/trigger-injection"
+for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
     "$HASHAI_BIN" integration generate --shell fish --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_FISH_BIN" -n "$a"
+    printf '%s' "$corpus_trigger" >"$d/expected-trigger"
+    env -u HASHAI_TRIGGER "$HASHAI_FISH_BIN" --no-config -c \
+        'source $argv[1]; printf %s $__hashai_fish_trigger' -- "$a" >"$d/actual-trigger"
+    cmp -s "$d/expected-trigger" "$d/actual-trigger"
+    test ! -e "$injection_marker"
 done
 "$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
 mkdir "$d/bin"
