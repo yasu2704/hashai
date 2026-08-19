@@ -37,6 +37,30 @@ jobs:
           docker run --rm -v "$PWD:/src:ro" bash:4.4 bash -n /src/shell/hashai.bash
           docker run --rm -v "$PWD:/src:ro" bash:4.4 bash -c 'source /src/shell/hashai.bash; declare -F __hashai_bash_replace_line'
 
+  zsh-zle:
+    name: Zsh ZLE integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install supported Zsh
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install --yes zsh
+            echo "ZSH_BIN=$(command -v zsh)" >> "$GITHUB_ENV"
+          else
+            echo "ZSH_BIN=$(command -v zsh)" >> "$GITHUB_ENV"
+          fi
+      - run: $ZSH_BIN -fc 'autoload -Uz is-at-least; is-at-least 5.8'
+      - run: cargo build
+      - run: $ZSH_BIN -n shell/hashai.zsh
+      - run: HASHAI_BIN=target/debug/hashai HASHAI_ZSH_BIN=$ZSH_BIN bash tests/zsh_zle_integration.sh
+
   quality:
     name: ${{ matrix.os }} quality
     runs-on: ${{ matrix.os }}
