@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'printf "Fish integration failed at line %s\n" "$LINENO" >&2' ERR
 : "${HASHAI_BIN:?}"; : "${HASHAI_FISH_BIN:=fish}"
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
+inject_unsupported_call() {
+    awk '/set -l core_status/ { print "    while jobs -p | string match -qx -- \"$worker\""; print "        wait $worker"; print "    end" } { print }' "$1"
+}
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
 d=$(mktemp -d); d=$(cd "$d" && pwd -P); trap 'rm -rf "$d"' EXIT; mkdir "$d/tmp"; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
 mkdir "$d/process-exit-probe"
@@ -39,7 +43,7 @@ HASHAI_CODEX_BIN="$d/fake-codex" HASHAI_DOCTOR_FISH_BIN="$HASHAI_FISH_BIN" HASHA
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); c={x["id"]:x for x in r["checks"]}; assert r["schema_version"] == 2, r; assert c["integration.artifact"]["message"] == "current", r; assert c["integration.startup_loader"]["status"] == "PASS", r; assert c["integration.startup_activation"]["message"] == "current-and-active" and c["integration.startup_activation"]["status"] == "PASS", r' "$d/doctor.json"
 # A prior tracked artifact may contain the broken call while still matching its
 # manifest. The public update path must replace it with the current embedding.
-sed '/set -l core_status/i\    while jobs -p | string match -qx -- "$worker"\n        wait $worker\n    end' "$a" >"$d/prior.fish"
+inject_unsupported_call "$a" >"$d/prior.fish"
 mv "$d/prior.fish" "$a"
 python3 -c 'import hashlib,json,sys; artifact,manifest=sys.argv[1:]; data=json.load(open(manifest)); data["artifact"]["sha256"]=hashlib.sha256(open(artifact,"rb").read()).hexdigest(); open(manifest,"w").write(json.dumps(data,indent=2)+"\n")' "$a" "$XDG_DATA_HOME/hashai/integrations/fish.manifest.json"
 "$HASHAI_BIN" integration update --trigger '@@ ' --keybinding ctrl-x >/dev/null
@@ -98,7 +102,7 @@ if grep -F 'string match:' "$d/log" >/dev/null; then
 fi
 if grep -E 'unknown option| has ended|hashai: warning:|fake core|command generation failed' "$d/log" >/dev/null; then printf 'safe success stderr exceeded its allowlist\n' >&2; exit 1; fi
 unsupported_mutated="$d/hashai.unsupported-mutated.fish"
-sed '/set -l core_status/i\    while jobs -p | string match -qx -- "$worker"\n        wait $worker\n    end' "$a" >"$unsupported_mutated"
+inject_unsupported_call "$a" >"$unsupported_mutated"
 test "$(grep -Fc 'string match -qx -- "$worker"' "$unsupported_mutated")" -eq 1
 run success "$original" 5 default '# ' "$unsupported_mutated"
 grep -F 'string match:' "$d/log" >/dev/null

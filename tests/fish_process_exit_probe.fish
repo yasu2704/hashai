@@ -22,3 +22,11 @@ and test (cat $trace_dir/jobs-status) -eq 1
 and not test -s $trace_dir/jobs
 and test (cat $trace_dir/wait-status) -eq 0
 and not test -s $trace_dir/wait-stderr
+or begin
+    printf 'events='; cat $trace_dir/events
+    printf 'jobs-status='; cat $trace_dir/jobs-status
+    printf 'jobs='; cat $trace_dir/jobs
+    printf 'wait-status='; cat $trace_dir/wait-status
+    printf 'wait-stderr='; cat $trace_dir/wait-stderr
+    return 1
+end
