@@ -377,6 +377,9 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         Shell::Auto => unreachable!(),
     };
     match bounded_interactive(&shell_executable(shell), &args, cancelled) {
+        Probe::Ok(_) if *shell == Shell::Fish && config.trigger_enabled => pass(
+            "configured keybinding was unbound or Hashai-owned before loading and is Hashai-owned after loading",
+        ),
         Probe::Ok(output) => keymap_result(&output, config.trigger_enabled),
         Probe::Cancelled => fail(7, "keybinding inspection cancelled"),
         Probe::Missing | Probe::Failed(_) => warn("keybinding inspection could not run"),
@@ -423,7 +426,8 @@ if test "$pre_default" = "$post_default"; and test "$pre_insert" = "$post_insert
     echo HASHAI_UNCHANGED:yes
 else
     echo HASHAI_UNCHANGED:no
-end"#.to_owned(),
+end
+test "$post_default" = owner; and test "$post_insert" = owner"#.to_owned(),
         Shell::Auto => unreachable!(),
     }
 }
