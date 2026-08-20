@@ -4,6 +4,7 @@ set -euo pipefail
 
 : "${HASHAI_BIN:?set HASHAI_BIN to the compiled hashai binary}"
 : "${HASHAI_BASH_BIN:=bash}"
+HASHAI_BIN=$(cd "$(dirname "$HASHAI_BIN")" && pwd -P)/$(basename "$HASHAI_BIN")
 export TERM=xterm-256color LANG=C.UTF-8
 # shellcheck source=shell_contract_cases.sh
 source tests/shell_contract_cases.sh

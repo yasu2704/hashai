@@ -35,6 +35,7 @@ def main() -> int:
     )
     os.close(slave)
     os.set_blocking(master, False)
+    shell_foreground_group = os.tcgetpgrp(master)
     progress = bytearray()
 
     def release_after_progress(group_index: int) -> None:
@@ -56,7 +57,7 @@ def main() -> int:
             sys.stdout.buffer.write(output)
             sys.stdout.buffer.flush()
         if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
-            while os.tcgetpgrp(master) == process.pid:
+            while os.tcgetpgrp(master) == shell_foreground_group:
                 if time.monotonic() >= deadline:
                     raise RuntimeError("Hashai did not acquire the terminal foreground")
                 time.sleep(0.01)
