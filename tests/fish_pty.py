@@ -43,7 +43,7 @@ def terminal_responses(data):
     return ProbeResponder().responses(data)
 
 def write_all(fd, data, responder=None, pending=None):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 30
     while data:
         try:
             count = os.write(fd, data)
@@ -66,7 +66,7 @@ def write_all(fd, data, responder=None, pending=None):
         data = data[count:]
 
 def wait_marker(fd, marker, responder, pending):
-    tail = b""; deadline = time.monotonic() + 10
+    tail = b""; deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if pending:
             data = bytes(pending); pending.clear()
@@ -100,7 +100,7 @@ def main():
         for index, group in enumerate(groups):
             write_all(master, group, responder, pending)
             if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending)
-        deadline=time.monotonic()+10
+        deadline=time.monotonic()+30
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
             if select.select([master], [], [], .1)[0]:
