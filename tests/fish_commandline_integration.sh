@@ -2,15 +2,43 @@
 set -euo pipefail
 : "${HASHAI_BIN:?}"; : "${HASHAI_FISH_BIN:=fish}"
 source tests/shell_contract_cases.sh
+fish_pty=$PWD/tests/fish_pty.py
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
-d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data"
-"$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
+"$HASHAI_BIN" integration install --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
+cat >"$d/fake-codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case ${1:-} in
+    --version) echo 'codex 9.9.9' ;;
+    login)
+        if [[ ${2:-} == --help ]]; then echo status; else echo 'logged in'; fi
+        ;;
+    exec)
+        if [[ ${2:-} == --help ]]; then
+            echo 'exec --ephemeral --ignore-user-config --ignore-rules --model --config --sandbox --disable --skip-git-repo-check --output-schema --output-last-message'
+            exit 0
+        fi
+        out=
+        while (($#)); do
+            if [[ $1 == --output-last-message ]]; then out=$2; shift 2; else shift; fi
+        done
+        cat >/dev/null
+        printf '%s' '{"command":"printf ok","risk":"safe"}' >"$out"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod +x "$d/fake-codex"
+HASHAI_CODEX_BIN="$d/fake-codex" HASHAI_DOCTOR_FISH_BIN="$HASHAI_FISH_BIN" HASHAI_TRIGGER='@@ ' HASHAI_KEYBINDING=ctrl-x \
+    "$HASHAI_BIN" doctor --live --format json --shell fish >"$d/doctor.json"
+python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); c={x["id"]:x for x in r["checks"]}; assert r["schema_version"] == 2, r; assert c["integration.artifact"]["message"] == "current", r; assert c["integration.startup_loader"]["status"] == "PASS", r; assert c["integration.startup_activation"]["message"] == "current-and-active" and c["integration.startup_activation"]["status"] == "PASS", r' "$d/doctor.json"
 injection_marker="/tmp/hashai-trigger-injection-$$"
 rm -f "$injection_marker"
 trap 'rm -rf "$d"; rm -f "$injection_marker"' EXIT
 # shellcheck disable=SC1003 # literal quote/substitution corpus values
 for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
-    "$HASHAI_BIN" integration generate --shell fish --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
+    "$HASHAI_BIN" integration install --shell fish --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_FISH_BIN" -n "$a"
     printf '%s' "$corpus_trigger" >"$d/expected-trigger"
     env -u HASHAI_TRIGGER "$HASHAI_FISH_BIN" --no-config -c \
@@ -18,7 +46,7 @@ for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$in
     cmp -s "$d/expected-trigger" "$d/actual-trigger"
     test ! -e "$injection_marker"
 done
-"$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
 mkdir "$d/bin"
 write_shell_contract_fake "$d/bin" fish
 printf '%s\n' '#!/usr/bin/env bash' "printf '%s' \$'# first natural language\\n日本語 😀 second line' >\"\$1\"" >"$d/editor"; chmod +x "$d/editor"
@@ -39,7 +67,7 @@ bind \\cy __fish_edit_buffer
 echo '__HASHAI_FISH_'READY__
 EOF
 if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\0\030\0\024' >>"$d/cmd"; else printf '%s%s\030\0\024' "$b" "$moves" >>"$d/cmd"; fi
-if ! PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 tests/fish_pty.py "$d/cmd" >"$d/log"; then
+if ! (cd "$d" && PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
     cat "$d/log" >&2
     return 1
 fi
@@ -73,10 +101,10 @@ run noauto "$original" 5 default; test ! -e "$d/auto"
 # Disabled generation does not install either editor-mode Ctrl-X binding;
 # literal Ctrl-X followed by the separate Ctrl-T capture leaves state intact
 # and never reaches the fake Core.
-"$HASHAI_BIN" integration generate --shell fish --keybinding ctrl-x --disable-trigger >/dev/null
+"$HASHAI_BIN" integration install --shell fish --keybinding ctrl-x --disable-trigger >/dev/null
 run success "$original" 5 default '# ' "$a" disabled; printf '%s' "$original" >"$d/expected"; cmp "$d/expected" "$d/buffer"; cmp <(printf '5\n') "$d/cursor"; test ! -s "$d/request"
 if grep -F '__hashai_fish_replace_buffer' "$d/binding.default" "$d/binding.insert" >/dev/null; then printf 'disabled Fish artifact installed Ctrl-X\n' >&2; exit 1; fi
-"$HASHAI_BIN" integration generate --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
 run success 'echo untouched' 3 default; printf '%s' 'echo untouched' >"$d/expected"; cmp "$d/expected" "$d/buffer"; test ! -s "$d/request"
  # dispatch permutation mutation: installed literal Ctrl-G keeps the exposed input.
 dispatch_mutated="$d/hashai.dispatch-mutated.fish"

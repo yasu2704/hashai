@@ -15,7 +15,7 @@ fi
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 export XDG_DATA_HOME="$test_dir/data"
-"$HASHAI_BIN" integration generate --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.bash"
 
 # Artifact rendering must remain parseable for every supported trigger shape.
@@ -25,7 +25,7 @@ rm -f "$injection_marker"
 trap 'rm -rf "$test_dir"; rm -f "$injection_marker"' EXIT
 # shellcheck disable=SC1003 # literal quote/substitution corpus values
 for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
-    "$HASHAI_BIN" integration generate --shell bash --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
+    "$HASHAI_BIN" integration install --shell bash --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_BASH_BIN" -n "$artifact"
     printf '%s' "$corpus_trigger" >"$test_dir/expected-trigger"
     # shellcheck disable=SC2016 # expansion intentionally occurs in the child shell
@@ -34,7 +34,7 @@ for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$in
     cmp -s "$test_dir/expected-trigger" "$test_dir/actual-trigger"
     test ! -e "$injection_marker"
 done
-"$HASHAI_BIN" integration generate --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
 
 fake_bin="$test_dir/bin"
 write_shell_contract_fake "$fake_bin" bash
@@ -159,7 +159,7 @@ test ! -e "$test_dir/autoexecuted"
 # invocation is still inert due to its own enabled guard: no Core call and no
 # buffer/cursor mutation. This avoids treating unbound Ctrl-X's Readline prefix
 # behavior as a test harness exit mechanism.
-"$HASHAI_BIN" integration generate --shell bash --keybinding ctrl-x --disable-trigger >/dev/null
+"$HASHAI_BIN" integration install --shell bash --keybinding ctrl-x --disable-trigger >/dev/null
 readarray -t files < <(run_tty "$artifact" success '# disabled 日本語 😀' 5 '# ' '\C-x')
 printf '%s\n%s\n' '# disabled 日本語 😀' 5 >"$test_dir/expected-disabled"
 assert_file_equals "$test_dir/expected-disabled" "${files[0]}"
@@ -168,7 +168,7 @@ if grep -F '__hashai_bash_replace_line' "${files[2]}" >/dev/null; then
     printf 'disabled Bash artifact installed Ctrl-X\n' >&2
     exit 1
 fi
-"$HASHAI_BIN" integration generate --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null
 
 # dispatch permutation mutation: literal Ctrl-X must keep input when a copied
 # artifact dispatches to the wrong Core shell target.

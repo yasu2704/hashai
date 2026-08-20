@@ -183,25 +183,116 @@ fn run_config_show(args: hashai::cli::ConfigShowArgs) -> Result<(), HashaiError>
 fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
     let manager = IntegrationManager::from_system()?;
     match command {
-        IntegrationCommand::Generate(args) => {
+        IntegrationCommand::Install(args) => {
+            let requested_shell = args
+                .target
+                .shell
+                .or(args.target.shell_positional)
+                .ok_or_else(|| {
+                    HashaiError::ArgumentOrConfig(
+                        "integration shell must be bash, zsh, or fish".to_owned(),
+                    )
+                })?;
+            let shell = hashai::config::Shell::parse(&requested_shell)?;
+            let config = ConfigSources::from_system(overrides(args.overrides))?;
+            let manual = args.manual || shell != hashai::config::Shell::Fish;
+            let outcome = match manager.install_with_config(shell.clone(), &config, manual) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    print_failed_component_records(&shell, &error);
+                    return Err(error);
+                }
+            };
+            println!(
+                "{}\tartifact\t{}",
+                shell.as_str(),
+                outcome_name(&outcome.artifact)
+            );
+            println!(
+                "{}\tloader\t{}",
+                shell.as_str(),
+                outcome
+                    .loader
+                    .as_ref()
+                    .map(outcome_name)
+                    .unwrap_or("not-attempted")
+            );
+            println!(
+                "{}\tmanifest\t{}",
+                shell.as_str(),
+                outcome_name(&outcome.manifest)
+            );
+            if manual {
+                println!("{}\tstartup\tmanual-action-required", shell.as_str());
+                println!("# hashai snippet begin");
+                println!("source {}", shell_quote(&outcome.artifact_path));
+                println!("# hashai snippet end");
+            }
+        }
+        IntegrationCommand::Uninstall(args) => {
             let requested_shell = args.shell.or(args.shell_positional).ok_or_else(|| {
                 HashaiError::ArgumentOrConfig(
                     "integration shell must be bash, zsh, or fish".to_owned(),
                 )
             })?;
             let shell = hashai::config::Shell::parse(&requested_shell)?;
-            let config = ConfigSources::from_system(overrides(args.overrides))?;
-            let outcome = manager.generate_with_config(shell.clone(), &config)?;
-            print_write_result(&shell, manager.artifact_path(&shell), outcome);
+            let outcome = match manager.uninstall(shell.clone()) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    print_failed_component_records(&shell, &error);
+                    return Err(error);
+                }
+            };
+            println!(
+                "{}\tartifact\t{}",
+                shell.as_str(),
+                outcome_name(&outcome.artifact)
+            );
+            println!(
+                "{}\tloader\t{}",
+                shell.as_str(),
+                outcome
+                    .loader
+                    .as_ref()
+                    .map(outcome_name)
+                    .unwrap_or("not-attempted")
+            );
+            println!(
+                "{}\tmanifest\t{}",
+                shell.as_str(),
+                outcome_name(&outcome.manifest)
+            );
         }
         IntegrationCommand::Update(args) => {
             let config = ConfigSources::from_system(overrides(args))?;
             let summary = manager.update_with_config(&config)?;
             for (shell, outcome) in summary.outcomes {
-                print_write_result(&shell, manager.artifact_path(&shell), outcome);
+                println!(
+                    "{}\tartifact\t{}",
+                    shell.as_str(),
+                    outcome_name(&outcome.artifact)
+                );
+                println!(
+                    "{}\tloader\t{}",
+                    shell.as_str(),
+                    outcome
+                        .loader
+                        .as_ref()
+                        .map(outcome_name)
+                        .unwrap_or("not-attempted")
+                );
+                println!(
+                    "{}\tmanifest\t{}",
+                    shell.as_str(),
+                    outcome_name(&outcome.manifest)
+                );
             }
             if !summary.failures.is_empty() {
                 for failure in &summary.failures {
+                    let status = failure_status(&failure.message);
+                    println!("{}\tartifact\t{}", failure.shell.as_str(), status);
+                    println!("{}\tloader\tnot-attempted", failure.shell.as_str());
+                    println!("{}\tmanifest\tnot-attempted", failure.shell.as_str());
                     eprintln!(
                         "hashai: integration update for {} failed: {}",
                         failure.shell.as_str(),
@@ -215,12 +306,23 @@ fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
             }
         }
         IntegrationCommand::List => {
-            for installed in manager.list()? {
+            let config = ConfigSources::from_system(ConfigOverrides::default())?;
+            for installed in manager.list_with_config(&config)? {
                 let version = installed.version.as_deref().unwrap_or("unknown");
-                let status = if installed.is_current {
-                    "current"
-                } else {
-                    "outdated"
+                let status = match installed.state {
+                    hashai::integration::OwnershipState::TrackedExact => "current",
+                    hashai::integration::OwnershipState::TrackedPrior => "prior",
+                    hashai::integration::OwnershipState::UntrackedExactExpected => {
+                        "untracked-expected"
+                    }
+                    hashai::integration::OwnershipState::Modified => "modified",
+                    hashai::integration::OwnershipState::Foreign => "foreign",
+                    hashai::integration::OwnershipState::Unsafe => "unsafe",
+                    hashai::integration::OwnershipState::Unreadable => "unreadable",
+                    hashai::integration::OwnershipState::InterruptedRecoverable => {
+                        "interrupted-recoverable"
+                    }
+                    hashai::integration::OwnershipState::Absent => "absent",
                 };
                 println!(
                     "{}\t{}\t{}\t{}",
@@ -235,12 +337,41 @@ fn run_integration(command: IntegrationCommand) -> Result<(), HashaiError> {
     Ok(())
 }
 
-fn print_write_result(shell: &hashai::config::Shell, path: PathBuf, outcome: WriteOutcome) {
-    let action = match outcome {
+fn outcome_name(outcome: &WriteOutcome) -> &'static str {
+    match outcome {
         WriteOutcome::Written => "written",
         WriteOutcome::Unchanged => "unchanged",
-    };
-    println!("{}\t{}\t{}", shell.as_str(), action, path.display());
+        WriteOutcome::Adopted => "adopted",
+        WriteOutcome::Removed => "removed",
+        WriteOutcome::Absent => "absent",
+        WriteOutcome::ManualActionRequired => "manual-action-required",
+    }
+}
+
+fn shell_quote(path: &std::path::Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+fn failure_status(message: &str) -> &'static str {
+    if message.contains("unsafe") || message.contains("symlink") {
+        "unsafe"
+    } else if message.contains("unreadable") {
+        "unreadable"
+    } else if message.contains("journal") || message.contains("interrupted") {
+        "interrupted-recoverable"
+    } else {
+        "conflict"
+    }
+}
+
+fn print_failed_component_records(shell: &hashai::config::Shell, error: &HashaiError) {
+    println!(
+        "{}\tartifact\t{}",
+        shell.as_str(),
+        failure_status(&error.to_string())
+    );
+    println!("{}\tloader\tnot-attempted", shell.as_str());
+    println!("{}\tmanifest\tnot-attempted", shell.as_str());
 }
 
 fn codex_executable() -> PathBuf {

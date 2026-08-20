@@ -24,11 +24,11 @@ use serde::Serialize;
 
 use crate::{
     config::{Config, Shell},
-    integration::IntegrationManager,
+    integration::{IntegrationInspection, IntegrationManager, OwnershipState},
     runner::{CodexRunner, RunRequest},
 };
 
-pub const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_VERSION: u8 = 2;
 const IDS: &[&str] = &[
     "platform",
     "shell.kind",
@@ -54,7 +54,9 @@ const IDS: &[&str] = &[
     "auth",
     "model_reasoning",
     "keybinding",
-    "integration",
+    "integration.artifact",
+    "integration.startup_loader",
+    "integration.startup_activation",
     "json_processing",
     "outside_git_repository",
     "live_probe",
@@ -77,7 +79,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Check {
     pub id: &'static str,
     pub status: Status,
@@ -201,15 +203,17 @@ pub fn run(
         "model_reasoning",
         warn("model and reasoning availability requires --live"),
     ));
-    checks.push(named(
-        "keybinding",
-        if live {
-            keymap_probe(&shell, config, cancelled)
-        } else {
-            warn("keybinding inspection requires --live")
-        },
-    ));
-    checks.push(named("integration", integration_check(&shell)));
+    let keybinding = if live {
+        keymap_probe(&shell, config, cancelled)
+    } else {
+        warn("keybinding inspection requires --live")
+    };
+    let activation_proven = live && keybinding.status == Status::Pass;
+    checks.push(named("keybinding", keybinding));
+    let (artifact, loader, activation) = integration_checks(&shell, config, activation_proven);
+    checks.push(named("integration.artifact", artifact));
+    checks.push(named("integration.startup_loader", loader));
+    checks.push(named("integration.startup_activation", activation));
     checks.push(named(
         "json_processing",
         pass("JSON processing is built into hashai"),
@@ -337,7 +341,9 @@ fn live_probe(
 }
 
 fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check {
-    let artifact = match IntegrationManager::from_system().and_then(|manager| manager.list()) {
+    let artifact = match IntegrationManager::from_system()
+        .and_then(|manager| manager.list_with_config(config))
+    {
         Ok(items) => match items
             .into_iter()
             .find(|item| item.shell == *shell && item.is_current)
@@ -356,8 +362,8 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         (Shell::Bash, "ctrl-x") => "\\C-x",
         (Shell::Zsh, "ctrl-g") => "^G",
         (Shell::Zsh, "ctrl-x") => "^X",
-        (Shell::Fish, "ctrl-g") => "\\cg",
-        (Shell::Fish, "ctrl-x") => "\\cx",
+        (Shell::Fish, "ctrl-g") => "ctrl-g",
+        (Shell::Fish, "ctrl-x") => "ctrl-x",
         _ => return warn("keybinding shell is unknown"),
     };
     let script = keymap_harness_script(shell);
@@ -405,10 +411,10 @@ print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
         echo foreign
     end
 end
+emit fish_prompt
 set -l pre_default (bind --user -M default $argv[2] 2>/dev/null)
 set -l pre_insert (bind --user -M insert $argv[2] 2>/dev/null)
 printf 'HASHAI_PRE:%s,%s\n' (classify "$pre_default") (classify "$pre_insert")
-source $argv[1]
 set -l post_default (bind --user -M default $argv[2] 2>/dev/null)
 set -l post_insert (bind --user -M insert $argv[2] 2>/dev/null)
 printf 'HASHAI_POST:%s,%s\n' (classify "$post_default") (classify "$post_insert")
@@ -467,22 +473,62 @@ fn keymap_result(output: &str, enabled: bool) -> Check {
     }
 }
 
-fn integration_check(shell: &Shell) -> Check {
-    match IntegrationManager::from_system().and_then(|manager| manager.list()) {
-        Ok(items)
-            if items
-                .iter()
-                .any(|item| item.shell == *shell && item.is_current) =>
-        {
-            pass("current integration artifact installed")
-        }
-        Ok(items) if items.iter().any(|item| item.shell == *shell) => {
-            warn("integration artifact version is mismatched")
-        }
-        Ok(_) => warn("integration artifact is absent"),
-        Err(_) => fail(1, "integration artifact status is unreadable"),
+fn integration_checks(
+    shell: &Shell,
+    config: &Config,
+    activation_proven: bool,
+) -> (Check, Check, Check) {
+    let inspection = IntegrationManager::from_system()
+        .and_then(|manager| manager.inspect(shell, config))
+        .unwrap_or(IntegrationInspection {
+            artifact: OwnershipState::Unreadable,
+            loader: Some(OwnershipState::Unreadable),
+            desired_mode: None,
+        });
+    let artifact = match inspection.artifact {
+        OwnershipState::Absent => warn("absent"),
+        OwnershipState::UntrackedExactExpected => warn("untracked-expected"),
+        OwnershipState::TrackedExact => pass("current"),
+        OwnershipState::TrackedPrior => warn("prior-supported"),
+        OwnershipState::Modified => warn("modified"),
+        OwnershipState::Foreign => warn("foreign"),
+        OwnershipState::Unsafe => fail(1, "unsafe"),
+        OwnershipState::Unreadable => fail(1, "unreadable"),
+        OwnershipState::InterruptedRecoverable => warn("interrupted-recoverable"),
+    };
+    if *shell != Shell::Fish {
+        return (artifact, warn("manual-startup"), warn("manual-startup"));
     }
+    let loader_state = inspection.loader.unwrap_or(OwnershipState::Absent);
+    if matches!(
+        loader_state,
+        OwnershipState::Unsafe | OwnershipState::Unreadable
+    ) {
+        return (
+            artifact,
+            fail(1, "loader-unsafe-or-unreadable"),
+            warn("artifact-not-evaluated"),
+        );
+    }
+    if artifact.status == Status::Fail {
+        return (
+            artifact,
+            warn("artifact-not-evaluated"),
+            warn("artifact-not-evaluated"),
+        );
+    }
+    let loader = match loader_state {
+        OwnershipState::TrackedExact => pass("loader-state"),
+        _ => warn("loader-state"),
+    };
+    let activation = if loader.status == Status::Pass && activation_proven {
+        pass("current-and-active")
+    } else {
+        warn("loader-state")
+    };
+    (artifact, loader, activation)
 }
+
 fn shell_version(shell: &Shell, cancelled: &AtomicBool) -> Probe {
     bounded(&shell_executable(shell), &["--version"], cancelled)
 }
@@ -891,7 +937,8 @@ mod tests {
         assert!(zsh.find("pre_emacs").unwrap() < zsh.find("source").unwrap());
         let fish = keymap_harness_script(&Shell::Fish);
         assert!(fish.contains("-M default") && fish.contains("-M insert"));
-        assert!(fish.find("pre_default").unwrap() < fish.find("source").unwrap());
+        assert!(fish.find("emit fish_prompt").unwrap() < fish.find("pre_default").unwrap());
+        assert!(!fish.contains("source $argv[1]"));
     }
 
     #[cfg(unix)]
