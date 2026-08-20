@@ -81,7 +81,7 @@ EOF
 run_binding_dispatch() {
     local artifact_path=${1:-$artifact} mode=${2:-noauto} dispatch_line=${3:-'@@ dispatch 日本語 😀'} point=${4:-5} trigger=${5:-'@@ '}
     local request="$test_dir/dispatch-request" result="$test_dir/dispatch-result" bindings="$test_dir/dispatch-bindings" commands="$test_dir/dispatch-commands"
-    local characters moves= command_path=$fake_bin
+    local characters moves='' command_path=$fake_bin
     characters=${#dispatch_line}
     while (( characters > point )); do
         moves+='\e[D'

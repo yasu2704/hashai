@@ -74,15 +74,33 @@ def wait_marker(fd, marker, responder, pending, progress):
             data = bytes(pending); pending.clear()
             maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
-            if seen: return
+            if seen:
+                wait_until_quiet(fd, responder, pending, progress)
+                return
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096)
             for reply in responder.responses(data): write_all(fd, reply)
             sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
             maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
-            if seen: return
+            if seen:
+                wait_until_quiet(fd, responder, pending, progress)
+                return
     raise RuntimeError("Fish did not emit readiness marker")
+
+def wait_until_quiet(fd, responder, pending, progress):
+    """Wait for the completed widget's repaint before sending the next key."""
+    quiet_until = time.monotonic() + .1
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        timeout = max(0, quiet_until - time.monotonic())
+        if not select.select([fd], [], [], timeout)[0]:
+            return
+        data = os.read(fd, 4096)
+        for reply in responder.responses(data): write_all(fd, reply, pending=pending)
+        sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
+        maybe_release_progress(fd, data, progress)
+        quiet_until = time.monotonic() + .1
 
 def marker_seen(tail, data, marker):
     combined = tail + data
