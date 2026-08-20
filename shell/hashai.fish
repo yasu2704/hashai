@@ -5,8 +5,9 @@ set -g __hashai_fish_keybinding \cg
 set -g __hashai_fish_enabled_config 1
 
 # Fish event handlers execute outside the widget's local variable scope, so
-# their shared worker state is global. The polling handshake is consumed by
-# the widget separately; all worker event state is torn down here.
+# their shared worker state is global. The widget must consume and erase
+# __hashai_fish_cancel_cleanup_done before calling this helper; erasing that
+# handshake in the exit handler could leave both polling conditions unset.
 function __hashai_fish_cleanup_worker_state
     functions -e __hashai_fish_worker_int
     functions -e __hashai_fish_worker_exit
@@ -15,6 +16,7 @@ function __hashai_fish_cleanup_worker_state
     set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
     set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
     set -e -g __hashai_fish_progress_cr __hashai_fish_progress_el
+    # Erasing an unset variable returns nonzero; cleanup itself is idempotent.
     return 0
 end
 
@@ -87,7 +89,7 @@ function __hashai_fish_replace_buffer
     set -g __hashai_fish_progress_el "$progress_el"
     set -g __hashai_fish_worker_pid $worker
     set -g __hashai_fish_int_relayed 0
-    set -e __hashai_fish_cancel_cleanup_done
+    set -e -g __hashai_fish_cancel_cleanup_done
     functions -e __hashai_fish_worker_int 2>/dev/null
     function __hashai_fish_worker_int --on-signal INT
         if set -q __hashai_fish_worker_pid; and test "$__hashai_fish_int_relayed" = 0
@@ -95,7 +97,7 @@ function __hashai_fish_replace_buffer
             set -g __hashai_fish_int_relayed 1
         end
     end
-    set -e __hashai_fish_worker_status
+    set -e -g __hashai_fish_worker_status
     functions -e __hashai_fish_worker_exit 2>/dev/null
     function __hashai_fish_worker_exit --on-process-exit $worker
         set -g __hashai_fish_worker_status $argv[3]
@@ -110,7 +112,6 @@ function __hashai_fish_replace_buffer
             command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
             echo 'hashai: command generation failed; input preserved' >&2
             set -g __hashai_fish_cancel_cleanup_done 1
-            __hashai_fish_cleanup_worker_state
         end
     end
     set -l frame_index 1

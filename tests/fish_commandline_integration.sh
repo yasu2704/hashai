@@ -211,18 +211,19 @@ awk '$0 == "    if test \"$core_status\" -ne 0" { failure = 1 } failure && $0 ==
 test "$(grep -Fc 'commandline --replace -- corrupted; commandline --cursor 0' "$failure_mutated")" -eq 1
 run failure "$original" 5 default '# ' "$failure_mutated"; printf '%s' "$original" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'failure mutation was not detected\n' >&2; exit 1; fi
 cleanup_mutated="$d/hashai.cleanup-mutated.fish"
-awk '/^function __hashai_fish_cleanup_worker_state$/ { cleanup = 1 } cleanup && /set -e -g __hashai_fish_worker_active/ { removed++; next } cleanup && /^end$/ { cleanup = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cleanup_mutated"
-test "$(grep -Fc 'set -e -g __hashai_fish_worker_active' "$cleanup_mutated")" -eq 0
-"$HASHAI_FISH_BIN" -n "$cleanup_mutated"
+awk '/^function __hashai_fish_cleanup_worker_state$/ { cleanup = 1 } cleanup && /set -e -g __hashai_fish_worker_active/ { removed++; next } cleanup && /^end$/ { cleanup = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cleanup_mutated" || { printf 'could not create worker cleanup mutation\n' >&2; exit 1; }
+test "$(grep -Fc 'set -e -g __hashai_fish_worker_active' "$cleanup_mutated")" -eq 0 || { printf 'worker cleanup mutation retained the target statement\n' >&2; exit 1; }
+"$HASHAI_FISH_BIN" -n "$cleanup_mutated" || { printf 'worker cleanup mutation is not valid Fish syntax\n' >&2; exit 1; }
 if run success "$original" 5 default '# ' "$cleanup_mutated"; then
     printf 'worker cleanup mutation was not detected\n' >&2
     exit 1
 fi
-test -s "$d/worker-active-status"
+test -s "$d/worker-active-status" || { printf 'worker cleanup mutation did not reach state capture\n' >&2; exit 1; }
 test "$(cat "$d/worker-active-status")" -eq 0 || { printf 'cleanup mutation failed for the wrong reason\n' >&2; exit 1; }
 cancel_cleanup_mutated="$d/hashai.cancel-cleanup-mutated.fish"
-awk '/^    if set -q __hashai_fish_cancel_cleanup_done$/ { cancel = 1 } cancel && /set -e -g __hashai_fish_cancel_cleanup_done/ { removed++; next } cancel && /^    end$/ { cancel = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cancel_cleanup_mutated"
-"$HASHAI_FISH_BIN" -n "$cancel_cleanup_mutated"
+awk '/^    if set -q __hashai_fish_cancel_cleanup_done$/ { cancel = 1 } cancel && /set -e -g __hashai_fish_cancel_cleanup_done/ { removed++; next } cancel && /^    end$/ { cancel = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cancel_cleanup_mutated" || { printf 'could not create cancel cleanup mutation\n' >&2; exit 1; }
+test "$(grep -Fc 'set -e -g __hashai_fish_cancel_cleanup_done' "$cancel_cleanup_mutated")" -eq 0 || { printf 'cancel cleanup mutation retained the target statement\n' >&2; exit 1; }
+"$HASHAI_FISH_BIN" -n "$cancel_cleanup_mutated" || { printf 'cancel cleanup mutation is not valid Fish syntax\n' >&2; exit 1; }
 if run interruptible "$original" 5 default '# ' "$cancel_cleanup_mutated"; then
     printf 'cancel cleanup mutation was not detected\n' >&2
     exit 1
