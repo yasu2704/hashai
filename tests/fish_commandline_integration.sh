@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
-trap 'printf "Fish integration failed at line %s\n" "$LINENO" >&2' ERR
+set -Eeuo pipefail
+trap 'printf "Fish integration failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 : "${HASHAI_BIN:?}"; : "${HASHAI_FISH_BIN:=fish}"
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
