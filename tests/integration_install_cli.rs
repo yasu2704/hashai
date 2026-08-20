@@ -196,18 +196,19 @@ fn ac1_install_recovery_converges_at_every_published_phase() {
 #[test]
 fn ac4_environment_paths_are_lexically_normalized_before_render_and_write() {
     let temp = tempfile::tempdir().unwrap();
-    let data = temp.path().join("outer/../data");
-    let config = temp.path().join("cfg/./nested/..");
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("outer/../data");
+    let config = root.join("cfg/./nested/..");
     let mut invocation = Command::cargo_bin("hashai").unwrap();
     invocation
-        .env("HOME", temp.path().join("home"))
+        .env("HOME", root.join("home"))
         .env("XDG_DATA_HOME", &data)
         .env("XDG_CONFIG_HOME", &config)
         .args(["integration", "install", "fish"])
         .assert()
         .success();
-    let artifact = temp.path().join("data/hashai/integrations/hashai.fish");
-    let loader = temp.path().join("cfg/fish/conf.d/hashai.fish");
+    let artifact = root.join("data/hashai/integrations/hashai.fish");
+    let loader = root.join("cfg/fish/conf.d/hashai.fish");
     assert!(artifact.is_file());
     assert!(loader.is_file());
     let rendered = fs::read_to_string(loader).unwrap();
@@ -350,10 +351,11 @@ fn ac1_manifest_and_journal_are_private_regular_files() {
 #[test]
 fn ac3_bash_snippet_sources_quote_corpus_without_expansion() {
     let temp = tempfile::tempdir().unwrap();
-    let data = temp.path().join("data \\ ' $(false) `false` ; 日本語 😀");
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("data \\ ' $(false) `false` ; 日本語 😀");
     let output = Command::cargo_bin("hashai")
         .unwrap()
-        .env("HOME", temp.path().join("home"))
+        .env("HOME", root.join("home"))
         .env("XDG_DATA_HOME", &data)
         .args(["integration", "install", "bash"])
         .output()

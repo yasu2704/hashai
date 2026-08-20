@@ -402,34 +402,20 @@ post_emacs=$(bindkey -M emacs "$2")
 post_viins=$(bindkey -M viins "$2")
 print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
 [[ $pre_emacs == "$post_emacs" && $pre_viins == "$post_viins" ]] && print -r -- HASHAI_UNCHANGED:yes || print -r -- HASHAI_UNCHANGED:no"#.to_owned(),
-        Shell::Fish => r#"function classify
-    if not set -q argv[1]
-        echo unbound
-        return
-    end
-    if string match -q '*__hashai_fish_replace_buffer*' -- $argv[1]
+        Shell::Fish => r#"function classify_map
+    if bind --user -M $argv[1] | string match -q '*__hashai_fish_replace_buffer*'
         echo owner
-    else if test -z "$argv[1]"
-        echo unbound
     else
-        echo foreign
-    end
-end
-function mapping
-    switch $argv[2]
-        case ctrl-g
-            bind --user -M $argv[1] \cg 2>/dev/null
-        case ctrl-x
-            bind --user -M $argv[1] \cx 2>/dev/null
+        echo unbound
     end
 end
 emit fish_prompt
-set -l pre_default (mapping default $argv[2])
-set -l pre_insert (mapping insert $argv[2])
-printf 'HASHAI_PRE:%s,%s\n' (classify "$pre_default") (classify "$pre_insert")
-set -l post_default (mapping default $argv[2])
-set -l post_insert (mapping insert $argv[2])
-printf 'HASHAI_POST:%s,%s\n' (classify "$post_default") (classify "$post_insert")
+set -l pre_default (classify_map default)
+set -l pre_insert (classify_map insert)
+printf 'HASHAI_PRE:%s,%s\n' $pre_default $pre_insert
+set -l post_default (classify_map default)
+set -l post_insert (classify_map insert)
+printf 'HASHAI_POST:%s,%s\n' $post_default $post_insert
 if test "$pre_default" = "$post_default"; and test "$pre_insert" = "$post_insert"
     echo HASHAI_UNCHANGED:yes
 else
@@ -948,7 +934,7 @@ mod tests {
         assert!(zsh.contains("-M emacs") && zsh.contains("-M viins"));
         assert!(zsh.find("pre_emacs").unwrap() < zsh.find("source").unwrap());
         let fish = keymap_harness_script(&Shell::Fish);
-        assert!(fish.contains("mapping default") && fish.contains("mapping insert"));
+        assert!(fish.contains("classify_map default") && fish.contains("classify_map insert"));
         assert!(fish.find("emit fish_prompt").unwrap() < fish.find("pre_default").unwrap());
         assert!(!fish.contains("source $argv[1]"));
     }
