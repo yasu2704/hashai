@@ -86,8 +86,8 @@ function __hashai_fish_replace_buffer
     function __hashai_fish_worker_exit --on-process-exit $worker
         set -g __hashai_fish_worker_status $argv[3]
         if test "$__hashai_fish_int_relayed" = 1
-            # Ctrl-C cancels this request even if the child wins the exit race
-            # with status 0; never install output after the user cancels it.
+            # If Ctrl-C was relayed before this event, cancellation wins even
+            # when the child exits 0 with complete output.
             printf '%s%s' "$__hashai_fish_progress_cr" "$__hashai_fish_progress_el" >&2
             if test -s "$__hashai_fish_stderr_file"
                 command cat -- "$__hashai_fish_stderr_file" >&2
@@ -97,11 +97,17 @@ function __hashai_fish_replace_buffer
             echo 'hashai: command generation failed; input preserved' >&2
             set -g __hashai_fish_cancel_cleanup_done 1
             set -e __hashai_fish_worker_active
+            functions -e __hashai_fish_worker_int
+            functions -e __hashai_fish_worker_exit
+            set -e __hashai_fish_worker_status
+            set -e __hashai_fish_worker_pid __hashai_fish_int_relayed
+            set -e __hashai_fish_stdout_file __hashai_fish_stderr_file
+            set -e __hashai_fish_progress_cr __hashai_fish_progress_el
         end
     end
     set -l frame_index 1
     printf '\n%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
-    while not set -q __hashai_fish_worker_status
+    while not set -q __hashai_fish_worker_status; and not set -q __hashai_fish_cancel_cleanup_done
         sleep 0.1
         set -q __hashai_fish_worker_status; and break
         set frame_index (math "$frame_index % "(count $frames)" + 1")

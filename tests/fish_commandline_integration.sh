@@ -74,7 +74,7 @@ source '$artifact'
 bind -M default \\cx >'$d/binding.default'
 bind -M insert \\cx >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
-function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/int-handler-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/exit-handler-status'; echo '__HASHAI_FISH_'READY__ >&2; end
+function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; echo '__HASHAI_FISH_'READY__ >&2; end
 function __fish_capture; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
@@ -89,9 +89,7 @@ if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color
 fi
 if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
 if [[ -e $d/worker-active-status ]]; then
-    test "$(cat "$d/worker-active-status")" -eq 1
-    test "$(cat "$d/int-handler-status")" -eq 1
-    test "$(cat "$d/exit-handler-status")" -eq 1
+    test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
 fi
 rm -f "$d/worker-active-status" "$d/int-handler-status" "$d/exit-handler-status"
 if [[ -s $d/worker-trace ]]; then

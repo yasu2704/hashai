@@ -57,7 +57,7 @@ case ${HASHAI_TEST_MODE:-success} in
         ;;
     interruptible)
         : "${HASHAI_SIGNAL_FILE:?}"
-        trap 'printf "INT\n" >>"$HASHAI_SIGNAL_FILE"; printf "%s\n" "fake core cancelled" >&2; exit 7' INT
+        trap 'printf "INT\n" >>"$HASHAI_SIGNAL_FILE"; printf "%s\n" "fake core cancelled" >&2; printf "%s\n" "printf '\''must not install cancelled output'\''"; exit 0' INT
         while :; do
             sleep 0.02
         done
