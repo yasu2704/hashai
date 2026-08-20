@@ -4,7 +4,7 @@ set -euo pipefail
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
-d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
+d=$(mktemp -d); d=$(cd "$d" && pwd -P); trap 'rm -rf "$d"' EXIT; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
 "$HASHAI_BIN" integration install --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null; a="$XDG_DATA_HOME/hashai/integrations/hashai.fish"
 cat >"$d/fake-codex" <<'EOF'
 #!/usr/bin/env bash

@@ -6,7 +6,12 @@ use crate::{
 };
 
 fn manager(temp: &tempfile::TempDir) -> IntegrationManager {
-    IntegrationManager::new(temp.path().join("managed-integrations"))
+    IntegrationManager::new(
+        temp.path()
+            .canonicalize()
+            .unwrap()
+            .join("managed-integrations"),
+    )
 }
 
 #[test]

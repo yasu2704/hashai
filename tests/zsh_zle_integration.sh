@@ -18,6 +18,7 @@ if (( zsh_major < 5 || (zsh_major == 5 && zsh_minor < 8) )); then
 fi
 
 test_dir=$(mktemp -d)
+test_dir=$(cd "$test_dir" && pwd -P)
 trap 'rm -rf "$test_dir"' EXIT
 canonical_request="$test_dir/canonical-request"
 printf '%s' "$HASHAI_CONTRACT_REQUEST" >"$canonical_request"

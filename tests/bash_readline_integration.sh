@@ -13,6 +13,7 @@ if (( BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 2) ))
 fi
 
 test_dir=$(mktemp -d)
+test_dir=$(cd "$test_dir" && pwd -P)
 trap 'rm -rf "$test_dir"' EXIT
 export XDG_DATA_HOME="$test_dir/data"
 "$HASHAI_BIN" integration install --shell bash --trigger '@@ ' --keybinding ctrl-x >/dev/null

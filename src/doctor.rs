@@ -403,6 +403,10 @@ post_viins=$(bindkey -M viins "$2")
 print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
 [[ $pre_emacs == "$post_emacs" && $pre_viins == "$post_viins" ]] && print -r -- HASHAI_UNCHANGED:yes || print -r -- HASHAI_UNCHANGED:no"#.to_owned(),
         Shell::Fish => r#"function classify
+    if not set -q argv[1]
+        echo unbound
+        return
+    end
     if string match -q '*__hashai_fish_replace_buffer*' -- $argv[1]
         echo owner
     else if test -z "$argv[1]"
