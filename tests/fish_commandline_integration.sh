@@ -75,7 +75,9 @@ bind -M default \\cx >'$d/binding.default'
 bind -M insert \\cx >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
 function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
-function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
+# Ctrl-T is a subsequent readline operation. It captures the buffer and proves
+# the completed widget left neither its re-entrancy latch nor event handlers.
+function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/worker-int-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/worker-exit-status'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
 function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
@@ -91,7 +93,9 @@ fi
 if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
 test -s "$d/worker-active-status" || { printf 'Fish post-widget state capture did not run\n' >&2; return 1; }
 test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
-rm -f "$d/worker-active-status"
+test "$(cat "$d/worker-int-status")" -eq 1 || { printf 'Fish worker INT handler remained after widget return\n' >&2; return 1; }
+test "$(cat "$d/worker-exit-status")" -eq 1 || { printf 'Fish worker process-exit handler remained after widget return\n' >&2; return 1; }
+rm -f "$d/worker-active-status" "$d/worker-int-status" "$d/worker-exit-status"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
     : "${worker_pgid:?Fish worker process group was not captured}"
@@ -205,4 +209,10 @@ failure_mutated="$d/hashai.failure-mutated.fish"
 awk '$0 == "    if test \"$core_status\" -ne 0" { failure = 1 } failure && $0 == "        echo '\''hashai: command generation failed; input preserved'\'' >&2" { print "        commandline --replace -- corrupted; commandline --cursor 0; echo '\''hashai: command generation failed; input preserved'\'' >&2"; failure = 0; next } { print }' "$a" >"$failure_mutated"
 test "$(grep -Fc 'commandline --replace -- corrupted; commandline --cursor 0' "$failure_mutated")" -eq 1
 run failure "$original" 5 default '# ' "$failure_mutated"; printf '%s' "$original" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'failure mutation was not detected\n' >&2; exit 1; fi
+cleanup_mutated="$d/hashai.cleanup-mutated.fish"
+awk '/^function __hashai_fish_cleanup_worker_state$/ { cleanup = 1 } cleanup && /set -e -g __hashai_fish_worker_active/ { removed++; next } cleanup && /^end$/ { cleanup = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cleanup_mutated"
+if run success "$original" 5 default '# ' "$cleanup_mutated"; then
+    printf 'worker cleanup mutation was not detected\n' >&2
+    exit 1
+fi
 printf 'Fish commandline PTY integration checks passed.\n'
