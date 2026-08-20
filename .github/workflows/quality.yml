@@ -131,4 +131,4 @@ jobs:
           status=$?
           set -e
           test "$status" = 3
-          python3 -c 'import json; r=json.load(open("doctor-report.json")); required={"platform","shell.kind","shell.version","json_processing","outside_git_repository"}; assert r["schema_version"] == 1 and r["mode"] == "static" and r["exit"] == 3; assert all(next(c for c in r["checks"] if c["id"] == i)["status"] == "PASS" for i in required); assert all(c["exit"] in (0,3) for c in r["checks"])'
+          python3 -c 'import json; r=json.load(open("doctor-report.json")); required={"platform","shell.kind","shell.version","json_processing","outside_git_repository"}; assert r["schema_version"] == 2 and r["mode"] == "static" and r["exit"] == 3; assert all(next(c for c in r["checks"] if c["id"] == i)["status"] == "PASS" for i in required); assert all(c["exit"] in (0,3) for c in r["checks"])'

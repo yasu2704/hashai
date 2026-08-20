@@ -30,11 +30,12 @@ fn command(temp: &TempDir, codex: &Path) -> Command {
         "doctor-supported-bash",
         "[ \"${1:-}\" = --version ] && { echo 'GNU bash, version 5.2.0'; exit 0; }; exit 1",
     );
+    let root = temp.path().canonicalize().unwrap();
     let mut command = Command::cargo_bin("hashai").unwrap();
     command
-        .current_dir(temp.path())
-        .env("XDG_CONFIG_HOME", temp.path().join("config"))
-        .env("XDG_DATA_HOME", temp.path().join("data"))
+        .current_dir(&root)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
         .env("HASHAI_CODEX_BIN", codex)
         // Generic doctor fixtures must not inherit macOS's unsupported system
         // Bash 3.2. Real-shell coverage explicitly selects and checks a real
@@ -86,7 +87,7 @@ fn ac1_ac2_ac3_ac4_ac5_ac7_static_json_is_ordered_and_redacted() {
 
     assert_eq!(output.status.code(), Some(0));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["schema_version"], 2);
     assert_eq!(report["overall"], "WARN");
     assert_eq!(report["exit"], 0);
     let ids: Vec<_> = report["checks"]
@@ -122,7 +123,9 @@ fn ac1_ac2_ac3_ac4_ac5_ac7_static_json_is_ordered_and_redacted() {
             "auth",
             "model_reasoning",
             "keybinding",
-            "integration",
+            "integration.artifact",
+            "integration.startup_loader",
+            "integration.startup_activation",
             "json_processing",
             "outside_git_repository",
             "live_probe"
@@ -407,7 +410,7 @@ fn integration_mismatch_and_unreadable_artifact_are_distinct_machine_checks() {
     let temp = TempDir::new().unwrap();
     let fake = fake_codex(&temp, capable_fake_body());
     command(&temp, &fake)
-        .args(["integration", "generate", "--shell", "bash"])
+        .args(["integration", "install", "--shell", "bash"])
         .assert()
         .success();
     let artifact = temp.path().join("data/hashai/integrations/hashai.bash");
@@ -436,7 +439,7 @@ fn live_keybinding_harness_loads_the_current_artifact_and_configured_key() {
     command(&temp, &fake)
         .args([
             "integration",
-            "generate",
+            "install",
             "--shell",
             "bash",
             "--keybinding",
@@ -476,14 +479,14 @@ fn live_keybinding_harness_uses_shell_specific_artifact_key_and_keymaps() {
         (
             "fish",
             "fish, version 3.6.0",
-            r#"\cx"#,
+            "ctrl-x",
             "HASHAI_DOCTOR_FISH_BIN",
         ),
     ] {
         command(&temp, &codex)
             .args([
                 "integration",
-                "generate",
+                "install",
                 "--shell",
                 shell_name,
                 "--keybinding",
@@ -530,7 +533,7 @@ fn live_probe_reports_typed_success_unauthenticated_and_model_unavailable_states
     .unwrap();
     assert_eq!(success_report["checks"][21]["status"], "PASS");
     assert_eq!(success_report["checks"][22]["status"], "PASS");
-    assert_eq!(success_report["checks"][27]["status"], "PASS");
+    assert_eq!(success_report["checks"][29]["status"], "PASS");
 
     for (stderr, auth, model, probe, exit) in [
         (
@@ -566,7 +569,7 @@ esac"#
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(report["checks"][21]["status"], auth);
         assert_eq!(report["checks"][22]["status"], model);
-        assert_eq!(report["checks"][27]["status"], probe);
+        assert_eq!(report["checks"][29]["status"], probe);
     }
 }
 
@@ -603,7 +606,7 @@ fn live_keybinding_harness_has_real_shell_semantics_when_shells_are_available() 
     command(&temp, &codex)
         .args([
             "integration",
-            "generate",
+            "install",
             "--shell",
             shell_name,
             "--keybinding",
@@ -635,7 +638,7 @@ fn disabled_live_keybinding_accepts_an_unchanged_foreign_binding() {
     command(&temp, &codex)
         .args([
             "integration",
-            "generate",
+            "install",
             "--shell",
             "bash",
             "--disable-trigger",
@@ -657,4 +660,94 @@ printf '%s\n' 'HASHAI_PRE:foreign' 'HASHAI_POST:foreign' 'HASHAI_UNCHANGED:yes'"
     assert_eq!(output.status.code(), Some(0));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["checks"][23]["status"], "PASS");
+}
+
+#[test]
+fn doctor_v2_reports_tracked_bash_as_current_with_manual_startup() {
+    let temp = TempDir::new().unwrap();
+    let fake = fake_codex(&temp, capable_fake_body());
+    command(&temp, &fake)
+        .args(["integration", "install", "bash"])
+        .assert()
+        .success();
+    let output = command(&temp, &fake)
+        .args(["doctor", "--format", "json", "--shell", "bash"])
+        .output()
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["checks"][24]["message"], "current");
+    assert_eq!(report["checks"][24]["status"], "PASS");
+    assert_eq!(report["checks"][25]["message"], "manual-startup");
+    assert_eq!(report["checks"][26]["message"], "manual-startup");
+}
+
+#[test]
+fn doctor_v2_loader_unsafe_is_fail_even_when_artifact_is_unsafe() {
+    use std::os::unix::fs::symlink;
+    let temp = TempDir::new().unwrap();
+    let fake = fake_codex(&temp, capable_fake_body());
+    let fish = fake_tool(
+        &temp,
+        "doctor-supported-fish",
+        "[ \"${1:-}\" = --version ] && { echo 'fish, version 4.0.0'; exit 0; }; exit 1",
+    );
+    command(&temp, &fake)
+        .args(["integration", "install", "fish"])
+        .assert()
+        .success();
+    let artifact = temp.path().join("data/hashai/integrations/hashai.fish");
+    fs::remove_file(&artifact).unwrap();
+    fs::create_dir(&artifact).unwrap();
+    let loader = temp.path().join("config/fish/conf.d/hashai.fish");
+    fs::remove_file(&loader).unwrap();
+    symlink(temp.path().join("outside"), &loader).unwrap();
+    let output = command(&temp, &fake)
+        .env("HASHAI_DOCTOR_FISH_BIN", fish)
+        .args(["doctor", "--format", "json", "--shell", "fish"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["checks"][24]["status"], "FAIL");
+    assert_eq!(report["checks"][25]["status"], "FAIL");
+    assert_eq!(
+        report["checks"][25]["message"],
+        "loader-unsafe-or-unreadable"
+    );
+    assert_eq!(report["checks"][26]["status"], "WARN");
+}
+
+#[test]
+fn doctor_v2_distinguishes_tracked_prior_and_interrupted_recoverable() {
+    let temp = TempDir::new().unwrap();
+    let fake = fake_codex(&temp, capable_fake_body());
+    command(&temp, &fake)
+        .args(["integration", "install", "bash"])
+        .assert()
+        .success();
+    let prior = command(&temp, &fake)
+        .env("HASHAI_KEYBINDING", "ctrl-x")
+        .args(["doctor", "--format", "json", "--shell", "bash"])
+        .output()
+        .unwrap();
+    let prior: Value = serde_json::from_slice(&prior.stdout).unwrap();
+    assert_eq!(prior["checks"][24]["status"], "WARN");
+    assert_eq!(prior["checks"][24]["message"], "prior-supported");
+
+    command(&temp, &fake)
+        .env("HASHAI_TEST_INTEGRATION_FAULT_PHASE", "artifact-published")
+        .args(["integration", "update", "--keybinding", "ctrl-x"])
+        .assert()
+        .code(1);
+    let interrupted = command(&temp, &fake)
+        .env("HASHAI_KEYBINDING", "ctrl-x")
+        .args(["doctor", "--format", "json", "--shell", "bash"])
+        .output()
+        .unwrap();
+    let interrupted: Value = serde_json::from_slice(&interrupted.stdout).unwrap();
+    assert_eq!(interrupted["checks"][24]["status"], "WARN");
+    assert_eq!(
+        interrupted["checks"][24]["message"],
+        "interrupted-recoverable"
+    );
 }

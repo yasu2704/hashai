@@ -24,11 +24,11 @@ use serde::Serialize;
 
 use crate::{
     config::{Config, Shell},
-    integration::IntegrationManager,
+    integration::{IntegrationInspection, IntegrationManager, OwnershipState},
     runner::{CodexRunner, RunRequest},
 };
 
-pub const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_VERSION: u8 = 2;
 const IDS: &[&str] = &[
     "platform",
     "shell.kind",
@@ -54,7 +54,9 @@ const IDS: &[&str] = &[
     "auth",
     "model_reasoning",
     "keybinding",
-    "integration",
+    "integration.artifact",
+    "integration.startup_loader",
+    "integration.startup_activation",
     "json_processing",
     "outside_git_repository",
     "live_probe",
@@ -77,7 +79,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Check {
     pub id: &'static str,
     pub status: Status,
@@ -201,15 +203,17 @@ pub fn run(
         "model_reasoning",
         warn("model and reasoning availability requires --live"),
     ));
-    checks.push(named(
-        "keybinding",
-        if live {
-            keymap_probe(&shell, config, cancelled)
-        } else {
-            warn("keybinding inspection requires --live")
-        },
-    ));
-    checks.push(named("integration", integration_check(&shell)));
+    let keybinding = if live {
+        keymap_probe(&shell, config, cancelled)
+    } else {
+        warn("keybinding inspection requires --live")
+    };
+    let activation_proven = live && keybinding.status == Status::Pass;
+    checks.push(named("keybinding", keybinding));
+    let (artifact, loader, activation) = integration_checks(&shell, config, activation_proven);
+    checks.push(named("integration.artifact", artifact));
+    checks.push(named("integration.startup_loader", loader));
+    checks.push(named("integration.startup_activation", activation));
     checks.push(named(
         "json_processing",
         pass("JSON processing is built into hashai"),
@@ -337,7 +341,9 @@ fn live_probe(
 }
 
 fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check {
-    let artifact = match IntegrationManager::from_system().and_then(|manager| manager.list()) {
+    let artifact = match IntegrationManager::from_system()
+        .and_then(|manager| manager.list_with_config(config))
+    {
         Ok(items) => match items
             .into_iter()
             .find(|item| item.shell == *shell && item.is_current)
@@ -356,8 +362,8 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         (Shell::Bash, "ctrl-x") => "\\C-x",
         (Shell::Zsh, "ctrl-g") => "^G",
         (Shell::Zsh, "ctrl-x") => "^X",
-        (Shell::Fish, "ctrl-g") => "\\cg",
-        (Shell::Fish, "ctrl-x") => "\\cx",
+        (Shell::Fish, "ctrl-g") => "ctrl-g",
+        (Shell::Fish, "ctrl-x") => "ctrl-x",
         _ => return warn("keybinding shell is unknown"),
     };
     let script = keymap_harness_script(shell);
@@ -371,6 +377,9 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         Shell::Auto => unreachable!(),
     };
     match bounded_interactive(&shell_executable(shell), &args, cancelled) {
+        Probe::Ok(_) if *shell == Shell::Fish && config.trigger_enabled => pass(
+            "configured keybinding was unbound or Hashai-owned before loading and is Hashai-owned after loading",
+        ),
         Probe::Ok(output) => keymap_result(&output, config.trigger_enabled),
         Probe::Cancelled => fail(7, "keybinding inspection cancelled"),
         Probe::Missing | Probe::Failed(_) => warn("keybinding inspection could not run"),
@@ -396,27 +405,29 @@ post_emacs=$(bindkey -M emacs "$2")
 post_viins=$(bindkey -M viins "$2")
 print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
 [[ $pre_emacs == "$post_emacs" && $pre_viins == "$post_viins" ]] && print -r -- HASHAI_UNCHANGED:yes || print -r -- HASHAI_UNCHANGED:no"#.to_owned(),
-        Shell::Fish => r#"function classify
-    if string match -q '*__hashai_fish_replace_buffer*' -- $argv[1]
+        Shell::Fish => r#"function classify_map
+    if bind --user -M $argv[1] | string match -q '*__hashai_fish_replace_buffer*'
         echo owner
-    else if test -z "$argv[1]"
-        echo unbound
     else
-        echo foreign
+        echo unbound
     end
 end
-set -l pre_default (bind --user -M default $argv[2] 2>/dev/null)
-set -l pre_insert (bind --user -M insert $argv[2] 2>/dev/null)
-printf 'HASHAI_PRE:%s,%s\n' (classify "$pre_default") (classify "$pre_insert")
-source $argv[1]
-set -l post_default (bind --user -M default $argv[2] 2>/dev/null)
-set -l post_insert (bind --user -M insert $argv[2] 2>/dev/null)
-printf 'HASHAI_POST:%s,%s\n' (classify "$post_default") (classify "$post_insert")
+if not functions -q __hashai_fish_loader_activate
+    source $__fish_config_dir/conf.d/hashai.fish
+end
+emit fish_prompt
+set -l pre_default (classify_map default)
+set -l pre_insert (classify_map insert)
+printf 'HASHAI_PRE:%s,%s\n' $pre_default $pre_insert
+set -l post_default (classify_map default)
+set -l post_insert (classify_map insert)
+printf 'HASHAI_POST:%s,%s\n' $post_default $post_insert
 if test "$pre_default" = "$post_default"; and test "$pre_insert" = "$post_insert"
     echo HASHAI_UNCHANGED:yes
 else
     echo HASHAI_UNCHANGED:no
-end"#.to_owned(),
+end
+test "$post_default" = owner; and test "$post_insert" = owner"#.to_owned(),
         Shell::Auto => unreachable!(),
     }
 }
@@ -467,22 +478,62 @@ fn keymap_result(output: &str, enabled: bool) -> Check {
     }
 }
 
-fn integration_check(shell: &Shell) -> Check {
-    match IntegrationManager::from_system().and_then(|manager| manager.list()) {
-        Ok(items)
-            if items
-                .iter()
-                .any(|item| item.shell == *shell && item.is_current) =>
-        {
-            pass("current integration artifact installed")
-        }
-        Ok(items) if items.iter().any(|item| item.shell == *shell) => {
-            warn("integration artifact version is mismatched")
-        }
-        Ok(_) => warn("integration artifact is absent"),
-        Err(_) => fail(1, "integration artifact status is unreadable"),
+fn integration_checks(
+    shell: &Shell,
+    config: &Config,
+    activation_proven: bool,
+) -> (Check, Check, Check) {
+    let inspection = IntegrationManager::from_system()
+        .and_then(|manager| manager.inspect(shell, config))
+        .unwrap_or(IntegrationInspection {
+            artifact: OwnershipState::Unreadable,
+            loader: Some(OwnershipState::Unreadable),
+            desired_mode: None,
+        });
+    let artifact = match inspection.artifact {
+        OwnershipState::Absent => warn("absent"),
+        OwnershipState::UntrackedExactExpected => warn("untracked-expected"),
+        OwnershipState::TrackedExact => pass("current"),
+        OwnershipState::TrackedPrior => warn("prior-supported"),
+        OwnershipState::Modified => warn("modified"),
+        OwnershipState::Foreign => warn("foreign"),
+        OwnershipState::Unsafe => fail(1, "unsafe"),
+        OwnershipState::Unreadable => fail(1, "unreadable"),
+        OwnershipState::InterruptedRecoverable => warn("interrupted-recoverable"),
+    };
+    if *shell != Shell::Fish {
+        return (artifact, warn("manual-startup"), warn("manual-startup"));
     }
+    let loader_state = inspection.loader.unwrap_or(OwnershipState::Absent);
+    if matches!(
+        loader_state,
+        OwnershipState::Unsafe | OwnershipState::Unreadable
+    ) {
+        return (
+            artifact,
+            fail(1, "loader-unsafe-or-unreadable"),
+            warn("artifact-not-evaluated"),
+        );
+    }
+    if artifact.status == Status::Fail {
+        return (
+            artifact,
+            warn("artifact-not-evaluated"),
+            warn("artifact-not-evaluated"),
+        );
+    }
+    let loader = match loader_state {
+        OwnershipState::TrackedExact => pass("loader-state"),
+        _ => warn("loader-state"),
+    };
+    let activation = if loader.status == Status::Pass && activation_proven {
+        pass("current-and-active")
+    } else {
+        warn("loader-state")
+    };
+    (artifact, loader, activation)
 }
+
 fn shell_version(shell: &Shell, cancelled: &AtomicBool) -> Probe {
     bounded(&shell_executable(shell), &["--version"], cancelled)
 }
@@ -538,16 +589,23 @@ fn bounded_interactive(program: &PathBuf, args: &[&str], cancelled: &AtomicBool)
     let reader_stop_for_thread = Arc::clone(&reader_stop);
     let reader = thread::spawn(move || {
         let mut output = Vec::new();
+        let mut stopped_idle_reads = 0;
         let file = unsafe { File::from_raw_fd(master) };
         unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
         loop {
             let mut chunk = [0; 4096];
             match (&file).read(&mut chunk) {
                 Ok(0) => break,
-                Ok(count) => output.extend_from_slice(&chunk[..count]),
+                Ok(count) => {
+                    output.extend_from_slice(&chunk[..count]);
+                    stopped_idle_reads = 0;
+                }
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     if reader_stop_for_thread.load(Ordering::SeqCst) {
-                        break;
+                        stopped_idle_reads += 1;
+                        if stopped_idle_reads >= 10 {
+                            break;
+                        }
                     }
                     thread::sleep(Duration::from_millis(5));
                 }
@@ -890,8 +948,10 @@ mod tests {
         assert!(zsh.contains("-M emacs") && zsh.contains("-M viins"));
         assert!(zsh.find("pre_emacs").unwrap() < zsh.find("source").unwrap());
         let fish = keymap_harness_script(&Shell::Fish);
-        assert!(fish.contains("-M default") && fish.contains("-M insert"));
-        assert!(fish.find("pre_default").unwrap() < fish.find("source").unwrap());
+        assert!(fish.contains("classify_map default") && fish.contains("classify_map insert"));
+        assert!(fish.contains("source $__fish_config_dir/conf.d/hashai.fish"));
+        assert!(fish.find("emit fish_prompt").unwrap() < fish.find("pre_default").unwrap());
+        assert!(!fish.contains("source $argv[1]"));
     }
 
     #[cfg(unix)]

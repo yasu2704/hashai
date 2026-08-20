@@ -18,18 +18,19 @@ if (( zsh_major < 5 || (zsh_major == 5 && zsh_minor < 8) )); then
 fi
 
 test_dir=$(mktemp -d)
+test_dir=$(cd "$test_dir" && pwd -P)
 trap 'rm -rf "$test_dir"' EXIT
 canonical_request="$test_dir/canonical-request"
 printf '%s' "$HASHAI_CONTRACT_REQUEST" >"$canonical_request"
 export XDG_DATA_HOME="$test_dir/data"
-"$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 artifact="$XDG_DATA_HOME/hashai/integrations/hashai.zsh"
 injection_marker="/tmp/hashai-trigger-injection-$$"
 rm -f "$injection_marker"
 trap 'rm -rf "$test_dir"; rm -f "$injection_marker"' EXIT
 # shellcheck disable=SC1003 # literal quote/substitution corpus values
 for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$injection_marker'\`" ';' $'\t' '日本語' '😀' ' leading' 'trailing '; do
-    "$HASHAI_BIN" integration generate --shell zsh --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
+    "$HASHAI_BIN" integration install --shell zsh --trigger "$corpus_trigger" --keybinding ctrl-x >/dev/null
     "$HASHAI_ZSH_BIN" -n "$artifact"
     printf '%s' "$corpus_trigger" >"$test_dir/expected-trigger"
     env -u HASHAI_TRIGGER "$HASHAI_ZSH_BIN" -dfc \
@@ -37,7 +38,7 @@ for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$in
     cmp -s "$test_dir/expected-trigger" "$test_dir/actual-trigger"
     test ! -e "$injection_marker"
 done
-"$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 # The emitted marker must not appear verbatim in setup input: a terminal echoes
 # typed setup before Zsh executes it, and the PTY runner waits on the output.
 readiness_command="print -r -- '__HASHAI_PTY_''READY__'"
@@ -243,7 +244,7 @@ test ! -e "$test_dir/autoexecuted"
 # Disabled artifacts register no Ctrl-X widget. Directly invoking the
 # production widget inside an interactive ZLE session remains inert because
 # its runtime enabled guard is unset; no request or buffer mutation occurs.
-"$HASHAI_BIN" integration generate --shell zsh --keybinding ctrl-x --disable-trigger >/dev/null
+"$HASHAI_BIN" integration install --shell zsh --keybinding ctrl-x --disable-trigger >/dev/null
 run_tty "$artifact" success '# disabled 日本語 😀' 5 e '# ' '' no
 printf '%s' '# disabled 日本語 😀' >"$test_dir/expected-disabled-buffer"
 printf '%s\n' 5 >"$test_dir/expected-disabled-cursor"
@@ -254,7 +255,7 @@ if grep -F '__hashai_zsh_replace_buffer' "$TTY_BINDING_EMACS" "$TTY_BINDING_VIIN
     printf 'disabled Zsh artifact installed Ctrl-X\n' >&2
     exit 1
 fi
-"$HASHAI_BIN" integration generate --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
+"$HASHAI_BIN" integration install --shell zsh --trigger '@@ ' --keybinding ctrl-x >/dev/null
 
 multiline_line=$HASHAI_CONTRACT_MULTILINE
 multiline_point=${#multiline_line}

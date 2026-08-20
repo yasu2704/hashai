@@ -62,8 +62,10 @@ pub struct IntegrationArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum IntegrationCommand {
-    /// Generate a managed integration artifact for one shell.
-    Generate(IntegrationGenerateArgs),
+    /// Install a managed artifact. Bash and Zsh require a manual startup action.
+    Install(IntegrationInstallArgs),
+    /// Remove manifest-backed managed integration files.
+    Uninstall(IntegrationShellArgs),
     /// Update every installed managed integration artifact.
     Update(IntegrationOverrideArgs),
     /// List installed managed integration artifacts without modifying them.
@@ -71,13 +73,22 @@ pub enum IntegrationCommand {
 }
 
 #[derive(Debug, Args)]
-pub struct IntegrationGenerateArgs {
+pub struct IntegrationInstallArgs {
     #[command(flatten)]
     pub overrides: IntegrationOverrideArgs,
-    /// Shell to generate: bash, zsh, or fish.
+    /// Do not install the Fish conf.d loader; print a manual source snippet.
+    #[arg(long)]
+    pub manual: bool,
+    #[command(flatten)]
+    pub target: IntegrationShellArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct IntegrationShellArgs {
+    /// Shell to manage: bash, zsh, or fish.
     #[arg(long, required_unless_present = "shell_positional")]
     pub shell: Option<String>,
-    /// Backwards-compatible positional form shown in the design document.
+    /// Positional shell form.
     #[arg(value_name = "SHELL", conflicts_with = "shell")]
     pub shell_positional: Option<String>,
 }

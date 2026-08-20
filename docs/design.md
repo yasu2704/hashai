@@ -139,17 +139,17 @@ Fish: commandline / bind ---------+         |
 
 ### 6.4 配布方法
 
-Coreから統合スクリプトを生成する方式を採用する。
+`integration install` が静的な統合artifactを作成する方式を採用する。
 
 ```bash
-hashai integration generate bash
-hashai integration generate zsh
-hashai integration generate fish
+hashai integration install bash
+hashai integration install zsh
+hashai integration install fish
 ```
 
-生成済みファイルを各シェルの設定からsourceする。シェル起動のたびにCoreを起動して統合コードを生成する方式は、起動時間と障害範囲の面からデフォルトにしない。
+Fishはmanaged `conf.d` loaderからsourceする。Bash/Zshは表示されたsnippetを利用者がstartup fileへ追加する。startup時にCore/Codexは起動しない。
 
-artifact はユーザーのhashaiデータディレクトリ配下の `integrations/hashai.<shell>` にだけ保存する。絶対パスの `XDG_DATA_HOME` が明示されている場合はOSを問わずその配下の `hashai/integrations` を使用し、相対パスまたは未指定時はOS標準のユーザーデータディレクトリを使用する。`generate` は指定shellのartifactを作成し、`update` は導入済みartifactだけを更新し、`list` は副作用なく導入済みartifactのshell・version・状態・pathをタブ区切りで表示する。artifactにはversion markerを含める。更新はshellごとのforward recoveryとし、失敗したshellの既存artifactはbyte-for-byte保持しつつ、他の導入済みshellの更新を継続する。成功と失敗を表示して全体はnonzeroで終了し、問題を解消して再実行すれば未更新artifactだけが更新される。更新はartifactごとに同じ管理ディレクトリ内のatomic renameで行い、既存の通常ファイルを `hashai.<shell>.bak` に保存する。書込み操作は管理ディレクトリに残す通常ファイル `.hashai-integration.lock` のadvisory lockで協調するhashaiプロセスを直列化する。ロック競合時は待機せず制御されたエラーで終了し、OSが保持者の終了時にlockを解放するためstale lockを削除する操作は不要とする。管理対象のディレクトリ、artifact、backup、lockがsymlinkまたは通常ファイル以外の場合は拒否し、任意パスへの出力は提供しない。これは同一ユーザーが管理するディレクトリを前提にした防御であり、悪意ある外部プロセスによるpath raceを完全に防ぐセキュリティ境界ではない。
+artifact はユーザーのhashaiデータディレクトリ配下の `integrations/hashai.<shell>` に保存する。`install` はartifact、Fish loader、strict ownership manifestを管理し、`uninstall` はmanifest-backed exact fileだけを削除する。`update` はtracked stateだけをshared lockとshell別transaction journalの下で更新し、各publish/delete phaseからforward recoveryする。untracked exact artifactはinstallだけがadoptでき、foreign/config-drift/modified/unsafe/unreadable stateを推測して上書き・削除しない。`list` とdoctorは同じownership classifierをread-onlyで使用する。各fileはsame-directory atomic renameを使い、`.hashai-integration.lock` は協調するhashai processを直列化するが、外部processとのpath raceに対するsecurity boundaryではない。
 
 ### 6.5 対応環境
 
@@ -358,13 +358,14 @@ reasoning_effort = "low"
 extra_instructions = "Prefer rg over grep when available."
 ```
 
-優先順位は、CLI引数、環境変数、ユーザー設定、組み込みデフォルトの順とする。editor integration の一過性の上書きは `integration generate` と `integration update`、`config show` の `--trigger`、`--keybinding`、`--disable-trigger` で指定できる。`--trigger` と `--disable-trigger` は同時に指定できない。環境変数は `HASHAI_TRIGGER`（互換）、`HASHAI_TRIGGER_ENABLED=true|false`、`HASHAI_KEYBINDING=ctrl-g|ctrl-x` を使用する。生成済みartifactでは有効時に限り `HASHAI_TRIGGER` を実行時互換上書きとして読むが、keybinding は生成時に固定する。初期リリースでは未信頼リポジトリから挙動を変更されないよう、プロジェクト設定を読み込まない。`prompt.extra_instructions` はユーザー設定でのみ指定できる。`review` と `dangerous` の警告は無効化できない。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
+優先順位は、CLI引数、環境変数、ユーザー設定、組み込みデフォルトの順とする。editor integration の一過性の上書きは `integration install` と `integration update`、`config show` の `--trigger`、`--keybinding`、`--disable-trigger` で指定できる。`--trigger` と `--disable-trigger` は同時に指定できない。環境変数は `HASHAI_TRIGGER`（互換）、`HASHAI_TRIGGER_ENABLED=true|false`、`HASHAI_KEYBINDING=ctrl-g|ctrl-x` を使用する。install artifactでは有効時に限り `HASHAI_TRIGGER` を実行時互換上書きとして読むが、keybinding はinstall/update時に固定する。初期リリースでは未信頼リポジトリから挙動を変更されないよう、プロジェクト設定を読み込まない。`prompt.extra_instructions` はユーザー設定でのみ指定できる。`review` と `dangerous` の警告は無効化できない。APIキーをhashai自身の設定ファイルへ保存せず、Codex CLIの認証を利用する。
 
 ## 13. CLI案
 
 ```text
 hashai generate <natural-language>
-hashai integration generate <bash|zsh|fish>
+hashai integration install <bash|zsh|fish>
+hashai integration uninstall <bash|zsh|fish>
 hashai integration update
 hashai integration list
 hashai config show
