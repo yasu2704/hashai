@@ -5,13 +5,14 @@ set -g __hashai_fish_keybinding \cg
 set -g __hashai_fish_enabled_config 1
 
 # Fish event handlers execute outside the widget's local variable scope, so
-# their shared worker state is global. The widget must consume and erase
-# __hashai_fish_cancel_cleanup_done before calling this helper; erasing that
-# handshake in the exit handler could leave both polling conditions unset.
+# their shared worker state is global. __hashai_fish_cancel_cleanup_done is a
+# polling handshake, reset before each worker and consumed if the widget resumes.
 function __hashai_fish_cleanup_worker_state
     functions -e __hashai_fish_worker_int
     functions -e __hashai_fish_worker_exit
-    set -e -g __hashai_fish_worker_active
+    if not contains -- --preserve-active $argv
+        set -e -g __hashai_fish_worker_active
+    end
     set -e -g __hashai_fish_worker_status
     set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
     set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
@@ -112,6 +113,7 @@ function __hashai_fish_replace_buffer
             command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
             echo 'hashai: command generation failed; input preserved' >&2
             set -g __hashai_fish_cancel_cleanup_done 1
+            __hashai_fish_cleanup_worker_state
         end
     end
     set -l frame_index 1
@@ -145,7 +147,7 @@ function __hashai_fish_replace_buffer
         return 0
     end
     set -l core_status $__hashai_fish_worker_status
-    __hashai_fish_cleanup_worker_state
+    __hashai_fish_cleanup_worker_state --preserve-active
     printf '%s%s' "$progress_cr" "$progress_el" >&2
     if test -s "$stderr_file"
         command cat -- "$stderr_file" >&2
@@ -155,6 +157,7 @@ function __hashai_fish_replace_buffer
         command rm -f -- "$stdout_file" "$stderr_file"
         echo 'hashai: command generation failed; input preserved' >&2
         commandline -f repaint
+        __hashai_fish_cleanup_worker_state
         return 0
     end
     set -l output (command cat -- "$stdout_file" | string collect -N)
@@ -163,21 +166,25 @@ function __hashai_fish_replace_buffer
     if test "$read_status" -ne 0
         echo 'hashai: could not read command output; input preserved' >&2
         commandline -f repaint
+        __hashai_fish_cleanup_worker_state
         return 0
     end
     string match -rq -- '(?s)^(?<generated>.*)\n\z' "$output"; or begin
         echo 'hashai: malformed command output; input preserved' >&2
         commandline -f repaint
+        __hashai_fish_cleanup_worker_state
         return 0
     end
     test -n "$generated"; or begin
         echo 'hashai: empty command; input preserved' >&2
         commandline -f repaint
+        __hashai_fish_cleanup_worker_state
         return 0
     end
     commandline --replace -- "$generated"
     commandline --cursor (string length -- "$generated")
     commandline -f repaint
+    __hashai_fish_cleanup_worker_state
 end
 
 function __hashai_fish_install_binding

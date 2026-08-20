@@ -77,7 +77,7 @@ functions -c __hashai_fish_replace_buffer __hashai_fish_real
 function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
 # Ctrl-T is a subsequent readline operation. It captures the buffer and worker
 # state, then exits the PTY; the Bash assertions below verify cleanup.
-function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/worker-int-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/worker-exit-status'; for worker_state in __hashai_fish_worker_active __hashai_fish_worker_status __hashai_fish_cancel_cleanup_done __hashai_fish_worker_pid __hashai_fish_int_relayed __hashai_fish_stdout_file __hashai_fish_stderr_file __hashai_fish_progress_cr __hashai_fish_progress_el; set -q \$worker_state; and echo \$worker_state; end >'$d/worker-state-leaks'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
+function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/worker-int-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/worker-exit-status'; for worker_state in __hashai_fish_worker_active __hashai_fish_worker_status __hashai_fish_worker_pid __hashai_fish_int_relayed __hashai_fish_stdout_file __hashai_fish_stderr_file __hashai_fish_progress_cr __hashai_fish_progress_el; set -q \$worker_state; and echo \$worker_state; end >'$d/worker-state-leaks'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
 function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
@@ -220,13 +220,4 @@ if run success "$original" 5 default '# ' "$cleanup_mutated"; then
 fi
 test -s "$d/worker-active-status" || { printf 'worker cleanup mutation did not reach state capture\n' >&2; exit 1; }
 test "$(cat "$d/worker-active-status")" -eq 0 || { printf 'cleanup mutation failed for the wrong reason\n' >&2; exit 1; }
-cancel_cleanup_mutated="$d/hashai.cancel-cleanup-mutated.fish"
-awk '/^    if set -q __hashai_fish_cancel_cleanup_done$/ { cancel = 1 } cancel && /set -e -g __hashai_fish_cancel_cleanup_done/ { removed++; next } cancel && /^    end$/ { cancel = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cancel_cleanup_mutated" || { printf 'could not create cancel cleanup mutation\n' >&2; exit 1; }
-test "$(grep -Fc 'set -e -g __hashai_fish_cancel_cleanup_done' "$cancel_cleanup_mutated")" -eq 0 || { printf 'cancel cleanup mutation retained the target statement\n' >&2; exit 1; }
-"$HASHAI_FISH_BIN" -n "$cancel_cleanup_mutated" || { printf 'cancel cleanup mutation is not valid Fish syntax\n' >&2; exit 1; }
-if run interruptible "$original" 5 default '# ' "$cancel_cleanup_mutated"; then
-    printf 'cancel cleanup mutation was not detected\n' >&2
-    exit 1
-fi
-grep -Fx __hashai_fish_cancel_cleanup_done "$d/worker-state-leaks" >/dev/null || { printf 'cancel cleanup mutation failed for the wrong reason\n' >&2; exit 1; }
 printf 'Fish commandline PTY integration checks passed.\n'
