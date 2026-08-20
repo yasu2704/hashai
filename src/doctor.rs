@@ -585,16 +585,23 @@ fn bounded_interactive(program: &PathBuf, args: &[&str], cancelled: &AtomicBool)
     let reader_stop_for_thread = Arc::clone(&reader_stop);
     let reader = thread::spawn(move || {
         let mut output = Vec::new();
+        let mut stopped_idle_reads = 0;
         let file = unsafe { File::from_raw_fd(master) };
         unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
         loop {
             let mut chunk = [0; 4096];
             match (&file).read(&mut chunk) {
                 Ok(0) => break,
-                Ok(count) => output.extend_from_slice(&chunk[..count]),
+                Ok(count) => {
+                    output.extend_from_slice(&chunk[..count]);
+                    stopped_idle_reads = 0;
+                }
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     if reader_stop_for_thread.load(Ordering::SeqCst) {
-                        break;
+                        stopped_idle_reads += 1;
+                        if stopped_idle_reads >= 10 {
+                            break;
+                        }
                     }
                     thread::sleep(Duration::from_millis(5));
                 }

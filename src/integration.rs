@@ -870,7 +870,9 @@ impl IntegrationManager {
                 "another integration operation is in progress; retry after it finishes".to_owned(),
             )
         })?;
-        operation()
+        let result = operation();
+        FileExt::unlock(&file)?;
+        result
     }
 
     fn ensure_managed_directory(&self) -> Result<(), HashaiError> {
