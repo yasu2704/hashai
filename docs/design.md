@@ -110,9 +110,13 @@ Fish: commandline / bind ---------+         |
 1. 現在の入力バッファとカーソル位置を取得する。
 2. 入力が変換対象か判定する。
 3. Coreを呼び出す。
-4. 生成されたコマンドを入力バッファへ戻す。
-5. カーソルを適切な位置へ移動する。
-6. 失敗時に元の入力を保持する。
+4. Coreの完了を待つ間、100ms基準のanimated progress indicatorを表示する。
+5. indicatorを消去してからCore stderrを転送する。
+6. 生成されたコマンドを入力バッファへ戻す。
+7. カーソルを適切な位置へ移動する。
+8. 失敗時に元の入力とlogical cursorをbyte-exactで保持する。
+
+Coreのstdoutとstderrは、worker起動前に作成・検証した別々のmode 0600 private regular temp fileへ保存する。shellは起動したHashai worker PIDだけを所有し、Coreが所有するCodex process groupやdescendantを直接signal/reapしない。indicatorはrequest、生成command、historyへ混入させず、success、failure、timeout、cancel、malformed outputを含む全終了経路で消去する。UTF-8 localeではBraille `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`、それ以外ではASCII `| / - \\`を固定順で使用する。
 
 ## 6. シェル別統合
 
@@ -122,18 +126,21 @@ Fish: commandline / bind ---------+         |
 - `READLINE_LINE` から入力を取得する。
 - `READLINE_POINT` を更新してカーソルを末尾へ移動する。
 - Coreが失敗した場合は `READLINE_LINE` を変更しない。
+- `bind -x` callback中にReadline bufferを即時再描画する公開APIがないため、TTY・`TERM != dumb`・terminfo capabilityを確認した場合だけ独立した一時status lineへindicatorを表示する。prompt文字列は推測・再生成しない。
 
 ### 6.2 Zsh
 
 - ZLE widgetとして実装する。
 - `BUFFER` から入力を取得し、結果を再設定する。
 - `CURSOR=${#BUFFER}` でカーソルを末尾へ移動する。
+- 元の`BUFFER` / `CURSOR`を保存し、生成中は一時suffixを追加して`zle redisplay`する。完了時はsuffixを消してからdiagnosticと最終bufferを再描画する。
 
 ### 6.3 Fish
 
 - `bind` で `Ctrl+G` にFish関数を割り当てる。
 - Fish の editor が公開する `commandline` buffer を契約境界とする。`edit_command_buffer` による複数行bufferを `string collect -N` とrecord delimiterのnamed captureで一要素としてCoreへ渡し、埋め込み改行を再分割・正規化しない。
 - `commandline` で入力を取得・置換する。
+- `commandline -f repaint`はinput queueへ追加されcallback中に即時実行されないため、Bashと同じcapability-gatedな独立status lineへindicatorを表示する。cleanup後に最終bufferを確定してrepaintをqueueする。
 - FishはBash/Zshと構文が異なるため、プロンプトへ `fish` を明示する。
 - コマンド置換時の改行分割とクォートに注意する。
 

@@ -4,6 +4,7 @@ set -euo pipefail
 
 : "${HASHAI_BIN:?set HASHAI_BIN to the compiled hashai binary}"
 : "${HASHAI_BASH_BIN:=bash}"
+export TERM=xterm-256color LANG=C.UTF-8
 # shellcheck source=shell_contract_cases.sh
 source tests/shell_contract_cases.sh
 
@@ -93,7 +94,16 @@ EOF
     # The fake consumes stdin while Ctrl-X is running, so the capture key must
     # be a later PTY group rather than bytes queued behind the Core request.
     printf '%s%b\030\0\001' "$dispatch_line" "$moves" >>"$commands"
-    if ! PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=bash HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
+    local -a progress_env=()
+    if [[ $mode == blocking || $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$test_dir/progress-release")
+        rm -f "$test_dir/progress-release"
+    fi
+    if [[ $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$test_dir/signal-relay")
+        : >"$test_dir/signal-relay"
+    fi
+    if ! env "${progress_env[@]}" TERM=xterm-256color LANG=C.UTF-8 PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=bash HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER="$trigger" \
         python3 tests/bash_readline_pty.py "$commands" >"$test_dir/dispatch.log"; then
         cat "$test_dir/dispatch.log" >&2
@@ -155,6 +165,22 @@ if ! cmp -s "$test_dir/expected-dispatch-request" "${files[0]}"; then
 fi
 assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
 test ! -e "$test_dir/autoexecuted"
+
+# AC-1: a blocking Core is mechanically released only after two distinct,
+# ordered frames have appeared through the real installed Ctrl-X binding.
+readarray -t files < <(run_binding_dispatch "$artifact" blocking '@@ dispatch 日本語 😀' 5 '@@ ')
+assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
+assert_file_equals "$test_dir/expected-success" "${files[1]}"
+test -e "$test_dir/progress-release"
+grep -F 'generating…' "$test_dir/dispatch.log" >/dev/null
+
+# AC-6: literal Ctrl-C is relayed once to the worker; the prompt survives and
+# the original editor state is restored for the subsequent capture binding.
+readarray -t files < <(run_binding_dispatch "$artifact" interruptible '@@ dispatch 日本語 😀' 5 '@@ ')
+assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
+printf '%s\n%s\n' '@@ dispatch 日本語 😀' 5 >"$test_dir/expected-cancelled"
+assert_file_equals "$test_dir/expected-cancelled" "${files[1]}"
+test "$(grep -c '^INT$' "$test_dir/signal-relay")" -eq 1
 
 # A disabled artifact has no baked Ctrl-X binding. A direct production-widget
 # invocation is still inert due to its own enabled guard: no Core call and no

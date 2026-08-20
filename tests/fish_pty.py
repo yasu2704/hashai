@@ -2,6 +2,8 @@
 """Run Fish command groups through a real PTY with marker synchronization."""
 import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
+PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
+
 class ProbeResponder:
     """Return deterministic replies for Fish's startup terminal probes."""
     def __init__(self): self.tail = b""
@@ -65,7 +67,7 @@ def write_all(fd, data, responder=None, pending=None):
             continue
         data = data[count:]
 
-def wait_marker(fd, marker, responder, pending):
+def wait_marker(fd, marker, responder, pending, progress):
     tail = b""; deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if pending:
@@ -76,6 +78,19 @@ def wait_marker(fd, marker, responder, pending):
             data = os.read(fd, 4096)
             for reply in responder.responses(data): write_all(fd, reply)
             sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
+            release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
+            if release and not os.path.exists(release):
+                progress.extend(data)
+                first = progress.find(PROGRESS_FRAMES[0])
+                second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
+                if second >= 0:
+                    if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
+                        os.write(fd, b"\x03")
+                        with open(release, "xb"):
+                            pass
+                    else:
+                        with open(release, "xb"):
+                            pass
             seen, tail = marker_seen(tail, data, marker)
             if seen: return
     raise RuntimeError("Fish did not emit readiness marker")
@@ -91,6 +106,7 @@ def main():
     master, slave = pty.openpty()
     responder = ProbeResponder()
     pending = bytearray()
+    progress = bytearray()
     def controlling_tty():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
@@ -99,7 +115,7 @@ def main():
     try:
         for index, group in enumerate(groups):
             write_all(master, group, responder, pending)
-            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending)
+            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending, progress)
         deadline=time.monotonic()+30
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
@@ -107,6 +123,19 @@ def main():
                 try:
                     data = os.read(master,4096)
                     for reply in responder.responses(data): write_all(master, reply)
+                    release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
+                    if release and not os.path.exists(release):
+                        progress.extend(data)
+                        first = progress.find(PROGRESS_FRAMES[0])
+                        second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
+                        if second >= 0:
+                            if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
+                                os.write(master, b"\x03")
+                                with open(release, "xb"):
+                                    pass
+                            else:
+                                with open(release, "xb"):
+                                    pass
                     sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
                 except OSError: pass
         return proc.wait()

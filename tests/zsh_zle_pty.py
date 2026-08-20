@@ -12,6 +12,7 @@ import time
 
 
 MAX_WRITE_CHUNK = 256
+PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
 
 
 def drain(fd: int, pending: bytearray) -> None:
@@ -58,13 +59,14 @@ def marker_seen(tail: bytes, output: bytes, marker: bytes) -> tuple[bool, bytes]
     return False, combined[-(len(marker) - 1) :]
 
 
-def read_until_marker(fd: int, marker: bytes, deadline: float, pending: bytearray) -> None:
+def read_until_marker(fd: int, marker: bytes, deadline: float, pending: bytearray, progress: bytearray) -> None:
     """Forward PTY output until setup has returned to an interactive prompt."""
     received = b""
     while marker not in received:
         if pending:
             output = bytes(pending)
             pending.clear()
+            maybe_release_progress(fd, output, progress)
             seen, received = marker_seen(received, output, marker)
             if seen:
                 return
@@ -78,10 +80,28 @@ def read_until_marker(fd: int, marker: bytes, deadline: float, pending: bytearra
         except (BlockingIOError, OSError):
             continue
         seen, received = marker_seen(received, output, marker)
+        maybe_release_progress(fd, output, progress)
         sys.stdout.buffer.write(output)
         sys.stdout.buffer.flush()
         if seen:
             return
+
+
+def maybe_release_progress(fd: int, output: bytes, progress: bytearray) -> None:
+    release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
+    if release is None or os.path.exists(release):
+        return
+    progress.extend(output)
+    first = progress.find(PROGRESS_FRAMES[0])
+    second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
+    if second >= 0:
+        if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
+            os.write(fd, b"\x03")
+            with open(release, "xb"):
+                pass
+        else:
+            with open(release, "xb"):
+                pass
 
 
 def main() -> int:
@@ -101,11 +121,12 @@ def main() -> int:
     os.close(slave)
     os.set_blocking(master, False)
     pending = bytearray()
+    progress = bytearray()
     try:
         for index, commands in enumerate(command_groups):
             write_all(master, commands, pending, index)
             if index + 1 < len(command_groups):
-                read_until_marker(master, b"__HASHAI_PTY_READY__", time.monotonic() + 10, pending)
+                read_until_marker(master, b"__HASHAI_PTY_READY__", time.monotonic() + 10, pending, progress)
         deadline = time.monotonic() + 10
         while process.poll() is None:
             if time.monotonic() >= deadline:

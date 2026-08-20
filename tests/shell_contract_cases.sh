@@ -42,6 +42,20 @@ case ${HASHAI_TEST_MODE:-success} in
     failure) printf '%s\n' 'fake core failure' >&2; exit 1 ;;
     timeout) printf '%s\n' 'fake core timeout' >&2; exit 6 ;;
     cancel) printf '%s\n' 'fake core cancelled' >&2; exit 7 ;;
+    blocking)
+        : "${HASHAI_PROGRESS_RELEASE_FILE:?}"
+        while [[ ! -e $HASHAI_PROGRESS_RELEASE_FILE ]]; do
+            sleep 0.02
+        done
+        printf '%s\n' "printf '日本語 😀  spaced'"
+        ;;
+    interruptible)
+        : "${HASHAI_SIGNAL_FILE:?}"
+        trap 'printf "INT\n" >>"$HASHAI_SIGNAL_FILE"; printf "%s\n" "fake core cancelled" >&2; exit 7' INT
+        while :; do
+            sleep 0.02
+        done
+        ;;
     status-[1-9]) exit "${HASHAI_TEST_MODE#status-}" ;;
     *) printf 'unknown mode\n' >&2; exit 2 ;;
 esac

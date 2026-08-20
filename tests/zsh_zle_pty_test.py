@@ -87,7 +87,7 @@ class MarkerSeenTests(unittest.TestCase):
             # The second half came from a later drain; wait consumes the same
             # shared pending stream rather than discarding it between phases.
             pending.extend(b"PTY_READY__\r\n% ")
-            read_until_marker(9, marker, 0, pending)
+            read_until_marker(9, marker, 0, pending, bytearray())
 
     def test_write_chunks_are_bounded_and_keep_order_after_eagain(self) -> None:
         pending = bytearray()
