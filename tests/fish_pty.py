@@ -134,8 +134,12 @@ def main():
             write_all(master, group, responder, pending)
             if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending, progress)
         deadline=time.monotonic()+30
+        retry_capture = time.monotonic() + .5
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
+            if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1" and time.monotonic() >= retry_capture:
+                os.write(master, b"\x14")
+                retry_capture = time.monotonic() + .5
             if select.select([master], [], [], .1)[0]:
                 try:
                     data = os.read(master,4096)
