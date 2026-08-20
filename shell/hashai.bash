@@ -35,18 +35,9 @@ __hashai_bash_progress_clear() {
     __hashai_bash_progress_visible=0
 }
 
-__hashai_bash_progress_animate() {
-    local frame_index=0
-    while :; do
-        sleep 0.1 || return 0
-        frame_index=$(( (frame_index + 1) % ${#__hashai_bash_progress_frames[@]} ))
-        __hashai_bash_progress_draw "${__hashai_bash_progress_frames[$frame_index]}"
-    done
-}
-
 __hashai_bash_replace_line() {
     local trigger=${HASHAI_TRIGGER:-$__hashai_bash_trigger}
-    local request command output error spinner status original_line original_point
+    local request command output error status original_line original_point
 
     # The binding installer is normally the only entry point, but retaining
     # this guard also makes an explicitly disabled generated artifact inert if
@@ -85,18 +76,10 @@ __hashai_bash_replace_line() {
     __hashai_bash_progress_visible=1
     printf '\n' >&2
     __hashai_bash_progress_draw "${__hashai_bash_progress_frames[0]}"
-    # Avoid exposing the timer as an interactive job while keeping Core in
-    # the foreground once the timer has started.
-    set +m
-    __hashai_bash_progress_animate &
-    spinner=$!
-    set -m
-    # Keep Core in the terminal foreground. Ctrl-C therefore reaches Hashai
-    # directly without first interrupting Readline's callback shell.
-    command hashai generate --shell bash -- "$request" >"$output" 2>"$error"
+    # Bash has no public callback-time redisplay API. Keep Core in the terminal
+    # foreground and use one transient frame without a background timer.
+    HASHAI_BASH_FOREGROUND_HANDOFF=1 command hashai generate --shell bash -- "$request" >"$output" 2>"$error"
     status=$?
-    kill "$spinner" 2>/dev/null || true
-    wait "$spinner" 2>/dev/null || true
     __hashai_bash_progress_clear
     if [[ -s $error ]]; then
         cat -- "$error" >&2 || printf '%s\n' 'hashai: could not forward command diagnostic; input preserved' >&2

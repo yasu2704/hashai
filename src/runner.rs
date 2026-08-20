@@ -123,6 +123,7 @@ impl CodexRunner {
             .arg("--output-last-message")
             .arg(output.path())
             .current_dir(&request.current_dir)
+            .env_remove("HASHAI_BASH_FOREGROUND_HANDOFF")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr_writer));

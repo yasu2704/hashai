@@ -110,13 +110,13 @@ Fish: commandline / bind ---------+         |
 1. 現在の入力バッファとカーソル位置を取得する。
 2. 入力が変換対象か判定する。
 3. Coreを呼び出す。
-4. Coreの完了を待つ間、100ms基準のanimated progress indicatorを表示する。
+4. Coreの完了を待つ間、Zsh/Fishでは100ms基準のanimated indicator、Bashでは一時的なstatic indicatorを表示する。
 5. indicatorを消去してからCore stderrを転送する。
 6. 生成されたコマンドを入力バッファへ戻す。
 7. カーソルを適切な位置へ移動する。
 8. 失敗時に元の入力とlogical cursorをbyte-exactで保持する。
 
-Coreのstdoutとstderrは、起動前に作成・検証した別々のmode 0600 private regular temp fileへ保存する。BashはHashaiをterminal foregroundに保ちspinner timerだけをbackground化する。Zsh/Fishは起動したHashai worker PIDだけを所有する。いずれもCoreが所有するCodex process groupやdescendantを直接signal/reapしない。indicatorはrequest、生成command、historyへ混入させず、success、failure、timeout、cancel、malformed outputを含む全終了経路で消去する。UTF-8 localeではBraille `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`、それ以外ではASCII `| / - \\`を固定順で使用する。
+Coreのstdoutとstderrは、起動前に作成・検証した別々のmode 0600 private regular temp fileへ保存する。BashはHashaiをterminal foregroundに保ち、背景timerを起動しない。Zsh/Fishは起動したHashai worker PIDだけを所有する。いずれもCoreが所有するCodex process groupやdescendantを直接signal/reapしない。indicatorはrequest、生成command、historyへ混入させず、success、failure、timeout、cancel、malformed outputを含む全終了経路で消去する。UTF-8 localeではZsh/FishがBraille固定順、Bashが先頭frame `⠋` を使用し、非UTF-8 localeではASCII frameを使用する。
 
 ## 6. シェル別統合
 
@@ -126,7 +126,7 @@ Coreのstdoutとstderrは、起動前に作成・検証した別々のmode 0600 
 - `READLINE_LINE` から入力を取得する。
 - `READLINE_POINT` を更新してカーソルを末尾へ移動する。
 - Coreが失敗した場合は `READLINE_LINE` を変更しない。
-- `bind -x` callback中にReadline bufferを即時再描画する公開APIがないため、TTY・`TERM != dumb`・terminfo capabilityを確認した場合だけ独立した一時status lineへindicatorを表示する。prompt文字列は推測・再生成しない。
+- `bind -x` callback中にReadline bufferを即時再描画する公開APIがなく、背景timerはmacOSのsignal/job-control semanticsを壊すため、TTY・`TERM != dumb`・terminfo capabilityを確認した場合だけ独立した一時status lineへstatic indicatorを表示する。prompt文字列は推測・再生成しない。
 
 ### 6.2 Zsh
 

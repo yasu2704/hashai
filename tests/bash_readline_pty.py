@@ -12,7 +12,8 @@ import termios
 import time
 
 
-PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
+PROGRESS_FRAME = "⠋".encode()
+ACTION_READY = b"__HASHAI_BASH_READY__"
 
 
 def main() -> int:
@@ -42,10 +43,9 @@ def main() -> int:
             time.sleep(0.5)
             return
         deadline = time.monotonic() + 5
-        frame_index = 0
-        while frame_index < len(PROGRESS_FRAMES):
+        while PROGRESS_FRAME not in progress:
             if time.monotonic() >= deadline:
-                raise RuntimeError("Bash did not display two ordered progress frames")
+                raise RuntimeError("Bash did not display its transient progress frame")
             if not select.select([master], [], [], 0.1)[0]:
                 continue
             try:
@@ -55,17 +55,25 @@ def main() -> int:
             progress.extend(output)
             sys.stdout.buffer.write(output)
             sys.stdout.buffer.flush()
-            while frame_index < len(PROGRESS_FRAMES):
-                position = progress.find(PROGRESS_FRAMES[frame_index])
-                if position < 0:
-                    break
-                del progress[: position + len(PROGRESS_FRAMES[frame_index])]
-                frame_index += 1
         if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
+            while os.tcgetpgrp(master) == process.pid:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Hashai did not acquire the terminal foreground")
+                time.sleep(0.01)
             os.write(master, b"\x03")
         else:
             with open(release, "xb"):
                 pass
+        tail = b""
+        while ACTION_READY not in tail:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Bash callback did not complete after progress release")
+            if not select.select([master], [], [], 0.1)[0]:
+                continue
+            output = os.read(master, 4096)
+            sys.stdout.buffer.write(output)
+            sys.stdout.buffer.flush()
+            tail = (tail + output)[-4096:]
     try:
         time.sleep(0.1)  # Let Bash enter Readline before sourcing the binding.
         for index, commands in enumerate(command_groups):

@@ -19,6 +19,13 @@ use hashai::{
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
 fn main() -> ProcessExitCode {
+    let _terminal_foreground = match TerminalForegroundGuard::from_environment() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("hashai: could not acquire terminal foreground: {error}");
+            return ProcessExitCode::from(1);
+        }
+    };
     let _ = ctrlc::set_handler(|| CANCELLED.store(true, Ordering::SeqCst));
     match run() {
         Ok(()) => ProcessExitCode::SUCCESS,
@@ -27,6 +34,62 @@ fn main() -> ProcessExitCode {
             eprintln!("hashai: {error}");
             ProcessExitCode::from(error.exit_code() as u8)
         }
+    }
+}
+
+struct TerminalForegroundGuard {
+    terminal_fd: libc::c_int,
+    original_group: libc::pid_t,
+}
+
+impl TerminalForegroundGuard {
+    fn from_environment() -> std::io::Result<Option<Self>> {
+        if std::env::var_os("HASHAI_BASH_FOREGROUND_HANDOFF").as_deref()
+            != Some(std::ffi::OsStr::new("1"))
+        {
+            return Ok(None);
+        }
+        let terminal_fd = libc::STDIN_FILENO;
+        let original_group = unsafe { libc::tcgetpgrp(terminal_fd) };
+        if original_group == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if unsafe { libc::setpgid(0, 0) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        set_terminal_group(terminal_fd, unsafe { libc::getpgrp() })?;
+        Ok(Some(Self {
+            terminal_fd,
+            original_group,
+        }))
+    }
+}
+
+impl Drop for TerminalForegroundGuard {
+    fn drop(&mut self) {
+        let _ = set_terminal_group(self.terminal_fd, self.original_group);
+    }
+}
+
+fn set_terminal_group(fd: libc::c_int, group: libc::pid_t) -> std::io::Result<()> {
+    let mut blocked = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+    let mut previous = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+    unsafe {
+        libc::sigemptyset(&mut blocked);
+        libc::sigaddset(&mut blocked, libc::SIGTTOU);
+        let mask_status = libc::pthread_sigmask(libc::SIG_BLOCK, &blocked, &mut previous);
+        if mask_status != 0 {
+            return Err(std::io::Error::from_raw_os_error(mask_status));
+        }
+    }
+    let result = unsafe { libc::tcsetpgrp(fd, group) };
+    let error = (result == -1).then(std::io::Error::last_os_error);
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+    }
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
 }
 
