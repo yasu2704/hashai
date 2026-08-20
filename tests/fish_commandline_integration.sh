@@ -77,7 +77,7 @@ functions -c __hashai_fish_replace_buffer __hashai_fish_real
 function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
 # Ctrl-T is a subsequent readline operation. It captures the buffer and proves
 # the completed widget left neither its re-entrancy latch nor event handlers.
-function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/worker-int-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/worker-exit-status'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
+function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/worker-int-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/worker-exit-status'; for worker_state in __hashai_fish_worker_active __hashai_fish_worker_status __hashai_fish_cancel_cleanup_done __hashai_fish_worker_pid __hashai_fish_int_relayed __hashai_fish_stdout_file __hashai_fish_stderr_file __hashai_fish_progress_cr __hashai_fish_progress_el; set -q \$worker_state; and echo \$worker_state; end >'$d/worker-state-leaks'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
 function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
@@ -91,10 +91,11 @@ if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color
     return 1
 fi
 if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
-test -s "$d/worker-active-status" || { printf 'Fish post-widget state capture did not run\n' >&2; return 1; }
+test -s "$d/worker-active-status"; and test -s "$d/worker-int-status"; and test -s "$d/worker-exit-status" || { printf 'Fish post-widget state capture did not complete\n' >&2; return 1; }
 test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
 test "$(cat "$d/worker-int-status")" -eq 1 || { printf 'Fish worker INT handler remained after widget return\n' >&2; return 1; }
 test "$(cat "$d/worker-exit-status")" -eq 1 || { printf 'Fish worker process-exit handler remained after widget return\n' >&2; return 1; }
+test ! -s "$d/worker-state-leaks" || { printf 'Fish worker state remained after widget return: %s\n' "$(tr '\n' ' ' <"$d/worker-state-leaks")" >&2; return 1; }
 rm -f "$d/worker-active-status" "$d/worker-int-status" "$d/worker-exit-status"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"

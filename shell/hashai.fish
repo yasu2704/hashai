@@ -4,13 +4,15 @@ set -g __hashai_fish_trigger '# '
 set -g __hashai_fish_keybinding \cg
 set -g __hashai_fish_enabled_config 1
 
-# Worker event state is global because Fish event handlers cannot capture the
-# widget's locals. Keep its teardown explicit and centralized here.
+# Fish event handlers execute outside the widget's local variable scope, so
+# their shared worker state is global. Keep its teardown centralized here.
 function __hashai_fish_cleanup_worker_state
     functions -e __hashai_fish_worker_int
     functions -e __hashai_fish_worker_exit
     set -e -g __hashai_fish_worker_active
-    set -e -g __hashai_fish_worker_status
+    if not contains -- --preserve-status $argv
+        set -e -g __hashai_fish_worker_status
+    end
     set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
     set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
     set -e -g __hashai_fish_progress_cr __hashai_fish_progress_el
@@ -109,7 +111,7 @@ function __hashai_fish_replace_buffer
             command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
             echo 'hashai: command generation failed; input preserved' >&2
             set -g __hashai_fish_cancel_cleanup_done 1
-            __hashai_fish_cleanup_worker_state
+            __hashai_fish_cleanup_worker_state --preserve-status
         end
     end
     set -l frame_index 1
