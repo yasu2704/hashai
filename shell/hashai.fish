@@ -94,6 +94,9 @@ function __hashai_fish_replace_buffer
     while jobs -p | string match -qx -- "$worker"
         wait $worker
     end
+    # Fish can retain an asynchronously reaped job-table entry after SIGINT.
+    # The process-exit event above proves the worker is done; drop that entry.
+    disown $worker 2>/dev/null
     set -l core_status $__hashai_fish_worker_status
     functions -e __hashai_fish_worker_exit
     functions -e __hashai_fish_worker_int
