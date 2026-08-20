@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
-trap 'printf "Fish integration failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
+set -euo pipefail
 : "${HASHAI_BIN:?}"; : "${HASHAI_FISH_BIN:=fish}"
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
@@ -86,7 +85,7 @@ if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color
     cat "$d/log" >&2
     return 1
 fi
-test ! -s "$d/jobs"
+if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
 fi

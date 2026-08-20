@@ -89,6 +89,9 @@ function __hashai_fish_replace_buffer
         set frame_index (math "$frame_index % "(count $frames)" + 1")
         printf '%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
     end
+    # The exit event is the status source of truth. A single wait on this
+    # known child reaps Fish's completed job entry without another diagnostic.
+    wait $worker
     set -l core_status $__hashai_fish_worker_status
     functions -e __hashai_fish_worker_exit
     functions -e __hashai_fish_worker_int
