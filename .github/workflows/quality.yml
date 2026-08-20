@@ -94,19 +94,20 @@ jobs:
       - run: $FISH_BIN --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
       - run: cargo build
       - run: $FISH_BIN -n shell/hashai.fish
-      - run: HASHAI_FISH_BIN=$FISH_BIN python3 -m unittest tests/fish_pty_test.py
+      - run: HASHAI_FISH_TEST_TIMEOUT=20 HASHAI_FISH_BIN=$FISH_BIN python3 -m unittest tests/fish_pty_test.py
       - run: HASHAI_FISH_TEST_TIMEOUT=20 HASHAI_BIN=target/debug/hashai HASHAI_FISH_BIN=$FISH_BIN bash tests/fish_commandline_integration.sh
       - name: Fish 3.6 process-exit and syntax contract
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 2
         run: |
           trace_dir=$(mktemp -d)
-          chmod 777 "$trace_dir"
+          interrupt_trace_dir=$(mktemp -d)
+          chmod 777 "$trace_dir" "$interrupt_trace_dir"
           docker run --rm --entrypoint fish purefish/docker-fish:3.6.3 --version
           docker run --rm -v "$PWD:/src:ro" --entrypoint fish purefish/docker-fish:3.6.3 -n /src/shell/hashai.fish
           docker run --rm -v "$PWD:/src:ro" --entrypoint fish purefish/docker-fish:3.6.3 -n /src/tests/fish_process_exit_probe.fish
           docker run --rm -v "$PWD:/src:ro" -v "$trace_dir:/trace" --entrypoint fish purefish/docker-fish:3.6.3 /src/tests/fish_process_exit_probe.fish /trace
-          docker run --rm -v "$PWD:/src:ro" -v "$trace_dir:/trace" --entrypoint fish purefish/docker-fish:3.6.3 /src/tests/fish_process_exit_probe.fish /trace interrupt
+          docker run --rm -v "$PWD:/src:ro" -v "$interrupt_trace_dir:/trace" --entrypoint fish purefish/docker-fish:3.6.3 /src/tests/fish_process_exit_probe.fish /trace interrupt
 
   quality:
     name: ${{ matrix.os }} quality

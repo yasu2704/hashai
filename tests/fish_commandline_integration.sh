@@ -43,6 +43,7 @@ python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); c={x["id"]:x for x 
 # A prior tracked artifact may contain the broken call while still matching its
 # manifest. The public update path must replace it with the current embedding.
 inject_unsupported_call "$a" >"$d/prior.fish"
+test "$(grep -Fc 'string match -qx -- "$worker"' "$d/prior.fish")" -eq 1
 mv "$d/prior.fish" "$a"
 python3 -c 'import hashlib,json,sys; artifact,manifest=sys.argv[1:]; data=json.load(open(manifest)); data["artifact"]["sha256"]=hashlib.sha256(open(artifact,"rb").read()).hexdigest(); open(manifest,"w").write(json.dumps(data,indent=2)+"\n")' "$a" "$XDG_DATA_HOME/hashai/integrations/fish.manifest.json"
 "$HASHAI_BIN" integration update --trigger '@@ ' --keybinding ctrl-x >/dev/null
@@ -62,6 +63,7 @@ for corpus_trigger in "'" '"' '\\' "\$(touch '$injection_marker')" "\`touch '$in
 done
 "$HASHAI_BIN" integration install --shell fish --trigger '@@ ' --keybinding ctrl-x >/dev/null
 mkdir "$d/bin"
+command -v pgrep >/dev/null
 write_shell_contract_fake "$d/bin" fish
 printf '%s\n' '#!/usr/bin/env bash' "printf '%s' \$'# first natural language\\n日本語 😀 second line' >\"\$1\"" >"$d/editor"; chmod +x "$d/editor"
 run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local setup_binding=; local mode_setup= length moves=; local -a progress_env=(); [[ ${7:-} == disabled ]] || setup_binding="bind -M $map \\cx __hashai_fish_replace_buffer"; [[ $map == insert ]] && mode_setup=$'fish_vi_key_bindings\nset -g fish_bind_mode insert'; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; : >"$d/worker-trace"; if [[ $mode == blocking || $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$d/progress-release"); rm -f "$d/progress-release"; fi; if [[ $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$d/signal-relay"); : >"$d/signal-relay"; fi; cat >"$d/cmd" <<EOF
@@ -72,7 +74,7 @@ source '$artifact'
 bind -M default \\cx >'$d/binding.default'
 bind -M insert \\cx >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
-function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
+function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; functions -q __hashai_fish_worker_int; echo \$status >'$d/int-handler-status'; functions -q __hashai_fish_worker_exit; echo \$status >'$d/exit-handler-status'; echo '__HASHAI_FISH_'READY__ >&2; end
 function __fish_capture; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
@@ -86,8 +88,15 @@ if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color
     return 1
 fi
 if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
+if [[ -e $d/worker-active-status ]]; then
+    test "$(cat "$d/worker-active-status")" -eq 1
+    test "$(cat "$d/int-handler-status")" -eq 1
+    test "$(cat "$d/exit-handler-status")" -eq 1
+fi
+rm -f "$d/worker-active-status" "$d/int-handler-status" "$d/exit-handler-status"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
+    : "${worker_pgid:?Fish worker process group was not captured}"
 fi
 for _cleanup_probe in {1..40}; do
     leaked_temp=$(find "$d/tmp" -maxdepth 1 -name 'hashai-*' -print)
