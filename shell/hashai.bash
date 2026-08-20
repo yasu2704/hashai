@@ -85,8 +85,12 @@ __hashai_bash_replace_line() {
     __hashai_bash_progress_visible=1
     printf '\n' >&2
     __hashai_bash_progress_draw "${__hashai_bash_progress_frames[0]}"
+    # Avoid exposing the timer as an interactive job while keeping Core in
+    # the foreground once the timer has started.
+    set +m
     __hashai_bash_progress_animate &
     spinner=$!
+    set -m
     # Keep Core in the terminal foreground. Ctrl-C therefore reaches Hashai
     # directly without first interrupting Readline's callback shell.
     command hashai generate --shell bash -- "$request" >"$output" 2>"$error"
