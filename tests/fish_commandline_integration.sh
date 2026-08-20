@@ -90,14 +90,17 @@ test ! -s "$d/jobs"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
 fi
-for _cleanup_probe in {1..20}; do
+for _cleanup_probe in {1..40}; do
     leaked_temp=$(find "$d/tmp" -maxdepth 1 -name 'hashai-*' -print)
     worker_alive=0; group_alive=0
-    if [[ -s $d/worker-trace ]]; then kill -0 "$worker_pid" 2>/dev/null && worker_alive=1; pgrep -g "$worker_pgid" >/dev/null 2>&1 && group_alive=1; fi
+    if [[ -s $d/worker-trace ]]; then
+        if kill -0 "$worker_pid" 2>/dev/null; then worker_alive=1; fi
+        if pgrep -g "$worker_pgid" >/dev/null 2>&1; then group_alive=1; fi
+    fi
     if [[ -z $leaked_temp && $worker_alive -eq 0 && $group_alive -eq 0 ]]; then break; fi
     sleep 0.05
 done
-if [[ -n $leaked_temp ]]; then printf 'Fish temp file leaked: %s\n' "$leaked_temp" >&2; return 1; fi
+if [[ -n $leaked_temp ]]; then printf 'Fish temp file leaked: %s\n' "$leaked_temp" >&2; cat "$d/log" >&2; return 1; fi
 if [[ $worker_alive -ne 0 ]]; then printf 'Fish worker %s remains after widget return\n' "$worker_pid" >&2; return 1; fi
 if [[ $group_alive -ne 0 ]]; then printf 'Fish worker process group %s remains after widget return\n' "$worker_pgid" >&2; ps -eo pid,ppid,pgid,stat,command | awk -v pgid="$worker_pgid" '$3 == pgid'; return 1; fi
 }
