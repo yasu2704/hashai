@@ -161,7 +161,8 @@ cmp "$d/expected" "$d/buffer"
 cmp <(printf '5\n') "$d/cursor"
 test "$(grep -c '^INT$' "$d/signal-relay")" -eq 1
 python3 -c 'import sys; data=open(sys.argv[1],"rb").read(); core=b"fake core cancelled"; generic=b"hashai: command generation failed; input preserved"; assert data.count(core)==1 and data.count(generic)==1 and data.index(core)<data.index(generic), data' "$d/log"
-HASHAI_INTERRUPT_SUCCESS=1 run interruptible "$original" 5 default
+HASHAI_INTERRUPT_SUCCESS=1 HASHAI_INTERRUPT_SUCCESS_FILE="$d/interrupt-success" run interruptible "$original" 5 default
+test "$(cat "$d/interrupt-success")" = success
 cmp "$d/expected" "$d/buffer"
 cmp <(printf '5\n') "$d/cursor"
 test "$(grep -c '^INT$' "$d/signal-relay")" -eq 1

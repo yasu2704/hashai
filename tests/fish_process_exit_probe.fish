@@ -24,7 +24,10 @@ while not set -q __hashai_probe_status; and test $attempts -lt 1000
     sleep 0.01
     set attempts (math $attempts + 1)
 end
-set -q __hashai_probe_status; or set -g __hashai_probe_status 255
+if not set -q __hashai_probe_status
+    set -g __hashai_probe_status 255
+    kill -KILL $worker 2>/dev/null
+end
 
 jobs -p >$trace_dir/jobs
 printf '%s\n' $status >$trace_dir/jobs-status

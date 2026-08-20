@@ -2,7 +2,7 @@
 """Run Fish command groups through a real PTY with marker synchronization."""
 import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
-locale_name = os.environ.get("LC_ALL") or os.environ.get("LC_CTYPE") or os.environ.get("LANG", "")
+locale_name = next((os.environ[key] for key in ("LC_ALL", "LC_CTYPE", "LANG") if key in os.environ), "")
 TEST_TIMEOUT = float(os.environ.get("HASHAI_FISH_TEST_TIMEOUT", "10"))
 PROGRESS_FRAMES = (
     ["⠋ generating…".encode(), "⠙ generating…".encode()]
