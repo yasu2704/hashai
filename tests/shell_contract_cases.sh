@@ -28,6 +28,9 @@ if [[ ${HASHAI_BASH_FOREGROUND_HANDOFF:-} == 1 && ${HASHAI_TEST_HANDOFF_ACTIVE:-
     exec python3 "${0%/*}/hashai-handoff.py" "$0" "$@"
 fi
 printf '%s' "${5-}" >"$HASHAI_REQUEST_FILE"
+if [[ -n ${HASHAI_WORKER_TRACE_FILE:-} ]]; then
+    printf '%s %s\n' "$BASHPID" "$(ps -o pgid= -p "$BASHPID" | tr -d ' ')" >"$HASHAI_WORKER_TRACE_FILE"
+fi
 case ${HASHAI_TEST_MODE:-success} in
     success) printf '%s\n' "printf '日本語 😀  spaced'" ;;
     review)

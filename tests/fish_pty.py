@@ -2,7 +2,12 @@
 """Run Fish command groups through a real PTY with marker synchronization."""
 import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
-PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
+locale_name = os.environ.get("LC_ALL") or os.environ.get("LC_CTYPE") or os.environ.get("LANG", "")
+PROGRESS_FRAMES = (
+    ["⠋ generating…".encode(), "⠙ generating…".encode()]
+    if re.search(r"UTF-?8", locale_name, re.IGNORECASE)
+    else ["| generating…".encode(), "/ generating…".encode()]
+)
 
 class ProbeResponder:
     """Return deterministic replies for Fish's startup terminal probes."""
