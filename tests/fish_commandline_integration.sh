@@ -82,13 +82,24 @@ bind \\cy __fish_edit_buffer
 echo '__HASHAI_FISH_'READY__
 EOF
 if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\0\030\0\024' >>"$d/cmd"; else printf '%s%s\030\0\024' "$b" "$moves" >>"$d/cmd"; fi
-if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color LANG=C.UTF-8 TMPDIR="$d/tmp" PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_WORKER_TRACE_FILE="$d/worker-trace" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" timeout "${HASHAI_FISH_TEST_TIMEOUT:-10}s" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
+if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color LANG=C.UTF-8 TMPDIR="$d/tmp" PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_WORKER_TRACE_FILE="$d/worker-trace" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
     cat "$d/log" >&2
     return 1
 fi
 test ! -s "$d/jobs"
-if find "$d/tmp" -maxdepth 1 -name 'hashai-*' -print -quit | grep . >/dev/null; then printf 'Fish temp file leaked\n' >&2; return 1; fi
-if [[ -s $d/worker-trace ]]; then read -r worker_pid worker_pgid <"$d/worker-trace"; ! kill -0 "$worker_pid" 2>/dev/null; ! pgrep -g "$worker_pgid" >/dev/null 2>&1; fi
+if [[ -s $d/worker-trace ]]; then
+    read -r worker_pid worker_pgid <"$d/worker-trace"
+fi
+for _cleanup_probe in {1..20}; do
+    leaked_temp=$(find "$d/tmp" -maxdepth 1 -name 'hashai-*' -print)
+    worker_alive=0; group_alive=0
+    if [[ -s $d/worker-trace ]]; then kill -0 "$worker_pid" 2>/dev/null && worker_alive=1; pgrep -g "$worker_pgid" >/dev/null 2>&1 && group_alive=1; fi
+    if [[ -z $leaked_temp && $worker_alive -eq 0 && $group_alive -eq 0 ]]; then break; fi
+    sleep 0.05
+done
+if [[ -n $leaked_temp ]]; then printf 'Fish temp file leaked: %s\n' "$leaked_temp" >&2; return 1; fi
+if [[ $worker_alive -ne 0 ]]; then printf 'Fish worker %s remains after widget return\n' "$worker_pid" >&2; return 1; fi
+if [[ $group_alive -ne 0 ]]; then printf 'Fish worker process group %s remains after widget return\n' "$worker_pgid" >&2; ps -eo pid,ppid,pgid,stat,command | awk -v pgid="$worker_pgid" '$3 == pgid'; return 1; fi
 }
 # Fish's editor normalizes literal tabs before widget dispatch; the shared
 # fixture documents the raw request while this PTY supplement tests exposed bytes.
