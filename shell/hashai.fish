@@ -126,7 +126,25 @@ function __hashai_fish_replace_buffer
     end
     # The exit event is the status source of truth. Waiting once on this known,
     # completed child is silent across supported Fish versions.
-    wait $worker
+    wait $worker 2>/dev/null
+    if test "$__hashai_fish_int_relayed" = 1
+        printf '%s%s' "$progress_cr" "$progress_el" >&2
+        if test -s "$stderr_file"
+            command cat -- "$stderr_file" >&2
+            or echo 'hashai: could not forward command diagnostic; input preserved' >&2
+        end
+        command rm -f -- "$stdout_file" "$stderr_file"
+        echo 'hashai: command generation failed; input preserved' >&2
+        functions -e __hashai_fish_worker_exit
+        functions -e __hashai_fish_worker_int
+        set -e -g __hashai_fish_worker_status
+        set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
+        set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
+        set -e -g __hashai_fish_progress_cr __hashai_fish_progress_el
+        set -e -g __hashai_fish_worker_active
+        commandline -f repaint
+        return 0
+    end
     set -l core_status $__hashai_fish_worker_status
     functions -e __hashai_fish_worker_exit
     functions -e __hashai_fish_worker_int

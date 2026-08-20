@@ -4,7 +4,7 @@ set -euo pipefail
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
 inject_unsupported_call() {
-    awk '$0 == "    wait $worker" { print "    while jobs -p | string match -qx -- \"$worker\""; print "        wait $worker"; print "    end"; next } { print }' "$1"
+    awk '$0 == "    wait $worker 2>/dev/null" { print "    while jobs -p | string match -qx -- \"$worker\""; print "        wait $worker"; print "    end"; next } { print }' "$1"
 }
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
 d=$(mktemp -d); d=$(cd "$d" && pwd -P); trap 'rm -rf "$d"' EXIT; mkdir "$d/tmp"; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
@@ -84,6 +84,7 @@ bind \\cy __fish_edit_buffer
 echo '__HASHAI_FISH_'READY__
 EOF
 if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\0\030\0\024' >>"$d/cmd"; else printf '%s%s\030\0\024' "$b" "$moves" >>"$d/cmd"; fi
+: >"$d/jobs"
 if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color LANG=C.UTF-8 TMPDIR="$d/tmp" PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_WORKER_TRACE_FILE="$d/worker-trace" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
     cat "$d/log" >&2
     return 1
@@ -92,10 +93,11 @@ if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s
 if [[ -e $d/worker-active-status ]]; then
     test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
 fi
-rm -f "$d/worker-active-status" "$d/int-handler-status" "$d/exit-handler-status"
+rm -f "$d/worker-active-status"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
     : "${worker_pgid:?Fish worker process group was not captured}"
+    [[ $worker_pgid =~ ^[0-9]+$ ]] || { printf 'Fish worker process group is not numeric: %s\n' "$worker_pgid" >&2; return 1; }
 fi
 for _cleanup_probe in {1..40}; do
     leaked_temp=$(find "$d/tmp" -maxdepth 1 -name 'hashai-*' -print)
