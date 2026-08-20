@@ -72,25 +72,14 @@ def wait_marker(fd, marker, responder, pending, progress):
     while time.monotonic() < deadline:
         if pending:
             data = bytes(pending); pending.clear()
+            maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
             if seen: return
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096)
             for reply in responder.responses(data): write_all(fd, reply)
             sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
-            release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
-            if release and not os.path.exists(release):
-                progress.extend(data)
-                first = progress.find(PROGRESS_FRAMES[0])
-                second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
-                if second >= 0:
-                    if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
-                        os.write(fd, b"\x03")
-                        with open(release, "xb"):
-                            pass
-                    else:
-                        with open(release, "xb"):
-                            pass
+            maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
             if seen: return
     raise RuntimeError("Fish did not emit readiness marker")
@@ -100,6 +89,16 @@ def marker_seen(tail, data, marker):
     if marker in combined:
         return True, b""
     return False, combined[-(len(marker)-1):]
+
+def maybe_release_progress(fd, data, progress):
+    release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
+    if not release or os.path.exists(release): return
+    progress.extend(data)
+    first = progress.find(PROGRESS_FRAMES[0])
+    second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
+    if second >= 0:
+        if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1": os.write(fd, b"\x03")
+        with open(release, "xb"): pass
 
 def main():
     groups = open(sys.argv[1], "rb").read().split(b"\0")
@@ -123,19 +122,7 @@ def main():
                 try:
                     data = os.read(master,4096)
                     for reply in responder.responses(data): write_all(master, reply)
-                    release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
-                    if release and not os.path.exists(release):
-                        progress.extend(data)
-                        first = progress.find(PROGRESS_FRAMES[0])
-                        second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
-                        if second >= 0:
-                            if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
-                                os.write(master, b"\x03")
-                                with open(release, "xb"):
-                                    pass
-                            else:
-                                with open(release, "xb"):
-                                    pass
+                    maybe_release_progress(master, data, progress)
                     sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
                 except OSError: pass
         return proc.wait()

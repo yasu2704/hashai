@@ -116,7 +116,7 @@ Fish: commandline / bind ---------+         |
 7. カーソルを適切な位置へ移動する。
 8. 失敗時に元の入力とlogical cursorをbyte-exactで保持する。
 
-Coreのstdoutとstderrは、worker起動前に作成・検証した別々のmode 0600 private regular temp fileへ保存する。shellは起動したHashai worker PIDだけを所有し、Coreが所有するCodex process groupやdescendantを直接signal/reapしない。indicatorはrequest、生成command、historyへ混入させず、success、failure、timeout、cancel、malformed outputを含む全終了経路で消去する。UTF-8 localeではBraille `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`、それ以外ではASCII `| / - \\`を固定順で使用する。
+Coreのstdoutとstderrは、起動前に作成・検証した別々のmode 0600 private regular temp fileへ保存する。BashはHashaiをterminal foregroundに保ちspinner timerだけをbackground化する。Zsh/Fishは起動したHashai worker PIDだけを所有する。いずれもCoreが所有するCodex process groupやdescendantを直接signal/reapしない。indicatorはrequest、生成command、historyへ混入させず、success、failure、timeout、cancel、malformed outputを含む全終了経路で消去する。UTF-8 localeではBraille `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`、それ以外ではASCII `| / - \\`を固定順で使用する。
 
 ## 6. シェル別統合
 

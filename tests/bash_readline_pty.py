@@ -62,7 +62,7 @@ def main() -> int:
                 del progress[: position + len(PROGRESS_FRAMES[frame_index])]
                 frame_index += 1
         if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1":
-            os.kill(process.pid, signal.SIGINT)
+            os.write(master, b"\x03")
         else:
             with open(release, "xb"):
                 pass
