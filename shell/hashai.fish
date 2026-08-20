@@ -96,13 +96,13 @@ function __hashai_fish_replace_buffer
             command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
             echo 'hashai: command generation failed; input preserved' >&2
             set -g __hashai_fish_cancel_cleanup_done 1
-            set -e __hashai_fish_worker_active
+            set -e -g __hashai_fish_worker_active
             functions -e __hashai_fish_worker_int
             functions -e __hashai_fish_worker_exit
-            set -e __hashai_fish_worker_status
-            set -e __hashai_fish_worker_pid __hashai_fish_int_relayed
-            set -e __hashai_fish_stdout_file __hashai_fish_stderr_file
-            set -e __hashai_fish_progress_cr __hashai_fish_progress_el
+            set -e -g __hashai_fish_worker_status
+            set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
+            set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
+            set -e -g __hashai_fish_progress_cr __hashai_fish_progress_el
         end
     end
     set -l frame_index 1
