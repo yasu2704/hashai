@@ -89,7 +89,11 @@ function __hashai_fish_replace_buffer
         set frame_index (math "$frame_index % "(count $frames)" + 1")
         printf '%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
     end
-    wait $worker
+    # SIGINT can interrupt Fish's wait even after the exit event records the
+    # worker status. Keep reaping until the job leaves Fish's job table.
+    while jobs -p | string match -qx -- "$worker"
+        wait $worker
+    end
     set -l core_status $__hashai_fish_worker_status
     functions -e __hashai_fish_worker_exit
     functions -e __hashai_fish_worker_int
