@@ -479,7 +479,7 @@ fn live_keybinding_harness_uses_shell_specific_artifact_key_and_keymaps() {
         (
             "fish",
             "fish, version 3.6.0",
-            r#"\cx"#,
+            "ctrl-x",
             "HASHAI_DOCTOR_FISH_BIN",
         ),
     ] {

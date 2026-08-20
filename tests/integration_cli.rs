@@ -5,10 +5,16 @@ use predicates::prelude::PredicateBooleanExt;
 use std::{fs, path::Path};
 
 fn command(data_home: &Path) -> Command {
+    let data_home = data_home
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .join(data_home.file_name().unwrap());
     let mut command = Command::cargo_bin("hashai").unwrap();
     command
         .env("HOME", data_home.join("home"))
-        .env("XDG_DATA_HOME", data_home)
+        .env("XDG_DATA_HOME", &data_home)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("HASHAI_TRIGGER")
         .env_remove("HASHAI_TRIGGER_ENABLED")

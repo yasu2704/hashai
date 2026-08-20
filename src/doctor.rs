@@ -362,8 +362,8 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         (Shell::Bash, "ctrl-x") => "\\C-x",
         (Shell::Zsh, "ctrl-g") => "^G",
         (Shell::Zsh, "ctrl-x") => "^X",
-        (Shell::Fish, "ctrl-g") => "\\cg",
-        (Shell::Fish, "ctrl-x") => "\\cx",
+        (Shell::Fish, "ctrl-g") => "ctrl-g",
+        (Shell::Fish, "ctrl-x") => "ctrl-x",
         _ => return warn("keybinding shell is unknown"),
     };
     let script = keymap_harness_script(shell);
@@ -417,9 +417,9 @@ print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
 end
 function mapping
     switch $argv[2]
-        case '\cg'
+        case ctrl-g
             bind --user -M $argv[1] \cg 2>/dev/null
-        case '\cx'
+        case ctrl-x
             bind --user -M $argv[1] \cx 2>/dev/null
     end
 end
