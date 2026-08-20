@@ -65,7 +65,6 @@ done
 mkdir "$d/bin"
 command -v pgrep >/dev/null
 write_shell_contract_fake "$d/bin" fish
-export HASHAI_INTERRUPT_SUCCESS=1
 printf '%s\n' '#!/usr/bin/env bash' "printf '%s' \$'# first natural language\\n日本語 😀 second line' >\"\$1\"" >"$d/editor"; chmod +x "$d/editor"
 run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local setup_binding=; local mode_setup= length moves=; local -a progress_env=(); [[ ${7:-} == disabled ]] || setup_binding="bind -M $map \\cx __hashai_fish_replace_buffer"; [[ $map == insert ]] && mode_setup=$'fish_vi_key_bindings\nset -g fish_bind_mode insert'; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; : >"$d/worker-trace"; if [[ $mode == blocking || $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$d/progress-release"); rm -f "$d/progress-release"; fi; if [[ $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$d/signal-relay"); : >"$d/signal-relay"; fi; cat >"$d/cmd" <<EOF
 $mode_setup
@@ -75,8 +74,8 @@ source '$artifact'
 bind -M default \\cx >'$d/binding.default'
 bind -M insert \\cx >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
-function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; echo '__HASHAI_FISH_'READY__ >&2; end
-function __fish_capture; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
+function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
+function __fish_capture; set -q __hashai_fish_worker_active; echo \$status >'$d/worker-active-status'; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
 function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
@@ -90,9 +89,8 @@ if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color
     return 1
 fi
 if [[ -s $d/jobs ]]; then printf 'Fish job entry remains after widget return: %s\n' "$(tr '\n' ' ' <"$d/jobs")" >&2; return 1; fi
-if [[ -e $d/worker-active-status ]]; then
-    test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
-fi
+test -s "$d/worker-active-status" || { printf 'Fish post-widget state capture did not run\n' >&2; return 1; }
+test "$(cat "$d/worker-active-status")" -eq 1 || { printf 'Fish worker-active guard remained set after widget return\n' >&2; return 1; }
 rm -f "$d/worker-active-status"
 if [[ -s $d/worker-trace ]]; then
     read -r worker_pid worker_pgid <"$d/worker-trace"
@@ -163,6 +161,11 @@ cmp "$d/expected" "$d/buffer"
 cmp <(printf '5\n') "$d/cursor"
 test "$(grep -c '^INT$' "$d/signal-relay")" -eq 1
 python3 -c 'import sys; data=open(sys.argv[1],"rb").read(); core=b"fake core cancelled"; generic=b"hashai: command generation failed; input preserved"; assert data.count(core)==1 and data.count(generic)==1 and data.index(core)<data.index(generic), data' "$d/log"
+HASHAI_INTERRUPT_SUCCESS=1 run interruptible "$original" 5 default
+cmp "$d/expected" "$d/buffer"
+cmp <(printf '5\n') "$d/cursor"
+test "$(grep -c '^INT$' "$d/signal-relay")" -eq 1
+python3 -c 'import sys; data=open(sys.argv[1],"rb").read(); assert b"must not install cancelled output" not in open(sys.argv[2],"rb").read(); assert data.count(b"fake core cancelled")==1 and data.count(b"hashai: command generation failed; input preserved")==1, data' "$d/log" "$d/buffer"
 # Disabled generation does not install either editor-mode Ctrl-X binding;
 # literal Ctrl-X followed by the separate Ctrl-T capture leaves state intact
 # and never reaches the fake Core.
