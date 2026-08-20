@@ -4,7 +4,7 @@ set -euo pipefail
 source tests/shell_contract_cases.sh
 fish_pty=$PWD/tests/fish_pty.py
 inject_unsupported_call() {
-    awk '/set -l core_status/ { print "    while jobs -p | string match -qx -- \"$worker\""; print "        wait $worker"; print "    end" } { print }' "$1"
+    awk '$0 == "    wait $worker" { print "    while jobs -p | string match -qx -- \"$worker\""; print "        wait $worker"; print "    end"; next } { print }' "$1"
 }
 "$HASHAI_FISH_BIN" --version | grep -Eq 'fish, version ([4-9]|3\.[6-9])'
 d=$(mktemp -d); d=$(cd "$d" && pwd -P); trap 'rm -rf "$d"' EXIT; mkdir "$d/tmp"; export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
@@ -188,7 +188,7 @@ sed 's/commandline --replace -- "\$generated"/commandline --replace -- corrupted
 test "$(grep -Fc 'commandline --replace -- corrupted' "$mutated")" -eq 1
 run success "$original" 5 default '# ' "$mutated"; printf '%s' "printf '日本語 😀  spaced'" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'success mutation was not detected\n' >&2; exit 1; fi
 failure_mutated="$d/hashai.failure-mutated.fish"
-sed "s/echo 'hashai: command generation failed; input preserved' >&2/commandline --replace -- corrupted; commandline --cursor 0; echo 'hashai: command generation failed; input preserved' >&2/" "$a" >"$failure_mutated"
+awk '$0 == "    if test \"$core_status\" -ne 0" { failure = 1 } failure && $0 == "        echo '\''hashai: command generation failed; input preserved'\'' >&2" { print "        commandline --replace -- corrupted; commandline --cursor 0; echo '\''hashai: command generation failed; input preserved'\'' >&2"; failure = 0; next } { print }' "$a" >"$failure_mutated"
 test "$(grep -Fc 'commandline --replace -- corrupted; commandline --cursor 0' "$failure_mutated")" -eq 1
 run failure "$original" 5 default '# ' "$failure_mutated"; printf '%s' "$original" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'failure mutation was not detected\n' >&2; exit 1; fi
 printf 'Fish commandline PTY integration checks passed.\n'
