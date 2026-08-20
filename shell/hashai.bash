@@ -37,7 +37,7 @@ __hashai_bash_progress_clear() {
 
 __hashai_bash_replace_line() {
     local trigger=${HASHAI_TRIGGER:-$__hashai_bash_trigger}
-    local request command output error worker status frame_index original_int_trap
+    local request command output error worker status frame_index original_int_trap original_line original_point
 
     # The binding installer is normally the only entry point, but retaining
     # this guard also makes an explicitly disabled generated artifact inert if
@@ -54,7 +54,9 @@ __hashai_bash_replace_line() {
         return 0
     fi
 
-    request=${READLINE_LINE#"$trigger"}
+    original_line=$READLINE_LINE
+    original_point=$READLINE_POINT
+    request=${original_line#"$trigger"}
     if ! output=$(mktemp "${TMPDIR:-/tmp}/hashai-readline-out.XXXXXX"); then
         printf '%s\n' 'hashai: could not prepare command output; input preserved' >&2
         return 0
@@ -106,6 +108,8 @@ __hashai_bash_replace_line() {
     fi
     if (( status != 0 )); then
         rm -f -- "$output" "$error"
+        READLINE_LINE=$original_line
+        READLINE_POINT=$original_point
         printf '%s\n' 'hashai: command generation failed; input preserved' >&2
         return 0
     fi
