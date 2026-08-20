@@ -409,6 +409,9 @@ print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
         echo unbound
     end
 end
+if not functions -q __hashai_fish_loader_activate
+    source $__fish_config_dir/conf.d/hashai.fish
+end
 emit fish_prompt
 set -l pre_default (classify_map default)
 set -l pre_insert (classify_map insert)
@@ -935,6 +938,7 @@ mod tests {
         assert!(zsh.find("pre_emacs").unwrap() < zsh.find("source").unwrap());
         let fish = keymap_harness_script(&Shell::Fish);
         assert!(fish.contains("classify_map default") && fish.contains("classify_map insert"));
+        assert!(fish.contains("source $__fish_config_dir/conf.d/hashai.fish"));
         assert!(fish.find("emit fish_prompt").unwrap() < fish.find("pre_default").unwrap());
         assert!(!fish.contains("source $argv[1]"));
     }
