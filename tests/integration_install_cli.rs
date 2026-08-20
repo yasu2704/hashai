@@ -4,11 +4,12 @@ use assert_cmd::Command;
 use fs2::FileExt;
 
 fn command(temp: &tempfile::TempDir) -> Command {
+    let root = temp.path().canonicalize().unwrap();
     let mut command = Command::cargo_bin("hashai").unwrap();
     command
-        .env("HOME", temp.path().join("home"))
-        .env("XDG_DATA_HOME", temp.path().join("data"))
-        .env("XDG_CONFIG_HOME", temp.path().join("config"));
+        .env("HOME", root.join("home"))
+        .env("XDG_DATA_HOME", root.join("data"))
+        .env("XDG_CONFIG_HOME", root.join("config"));
     command
 }
 

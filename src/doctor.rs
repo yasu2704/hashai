@@ -362,8 +362,8 @@ fn keymap_probe(shell: &Shell, config: &Config, cancelled: &AtomicBool) -> Check
         (Shell::Bash, "ctrl-x") => "\\C-x",
         (Shell::Zsh, "ctrl-g") => "^G",
         (Shell::Zsh, "ctrl-x") => "^X",
-        (Shell::Fish, "ctrl-g") => "ctrl-g",
-        (Shell::Fish, "ctrl-x") => "ctrl-x",
+        (Shell::Fish, "ctrl-g") => "\\cg",
+        (Shell::Fish, "ctrl-x") => "\\cx",
         _ => return warn("keybinding shell is unknown"),
     };
     let script = keymap_harness_script(shell);
@@ -415,12 +415,20 @@ print -r -- "HASHAI_POST:$(classify "$post_emacs"),$(classify "$post_viins")"
         echo foreign
     end
 end
+function mapping
+    switch $argv[2]
+        case '\cg'
+            bind --user -M $argv[1] \cg 2>/dev/null
+        case '\cx'
+            bind --user -M $argv[1] \cx 2>/dev/null
+    end
+end
 emit fish_prompt
-set -l pre_default (bind --user -M default $argv[2] 2>/dev/null)
-set -l pre_insert (bind --user -M insert $argv[2] 2>/dev/null)
+set -l pre_default (mapping default $argv[2])
+set -l pre_insert (mapping insert $argv[2])
 printf 'HASHAI_PRE:%s,%s\n' (classify "$pre_default") (classify "$pre_insert")
-set -l post_default (bind --user -M default $argv[2] 2>/dev/null)
-set -l post_insert (bind --user -M insert $argv[2] 2>/dev/null)
+set -l post_default (mapping default $argv[2])
+set -l post_insert (mapping insert $argv[2])
 printf 'HASHAI_POST:%s,%s\n' (classify "$post_default") (classify "$post_insert")
 if test "$pre_default" = "$post_default"; and test "$pre_insert" = "$post_insert"
     echo HASHAI_UNCHANGED:yes
@@ -940,7 +948,7 @@ mod tests {
         assert!(zsh.contains("-M emacs") && zsh.contains("-M viins"));
         assert!(zsh.find("pre_emacs").unwrap() < zsh.find("source").unwrap());
         let fish = keymap_harness_script(&Shell::Fish);
-        assert!(fish.contains("-M default") && fish.contains("-M insert"));
+        assert!(fish.contains("mapping default") && fish.contains("mapping insert"));
         assert!(fish.find("emit fish_prompt").unwrap() < fish.find("pre_default").unwrap());
         assert!(!fish.contains("source $argv[1]"));
     }

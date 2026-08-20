@@ -30,11 +30,12 @@ fn command(temp: &TempDir, codex: &Path) -> Command {
         "doctor-supported-bash",
         "[ \"${1:-}\" = --version ] && { echo 'GNU bash, version 5.2.0'; exit 0; }; exit 1",
     );
+    let root = temp.path().canonicalize().unwrap();
     let mut command = Command::cargo_bin("hashai").unwrap();
     command
-        .current_dir(temp.path())
-        .env("XDG_CONFIG_HOME", temp.path().join("config"))
-        .env("XDG_DATA_HOME", temp.path().join("data"))
+        .current_dir(&root)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
         .env("HASHAI_CODEX_BIN", codex)
         // Generic doctor fixtures must not inherit macOS's unsupported system
         // Bash 3.2. Real-shell coverage explicitly selects and checks a real
@@ -478,7 +479,7 @@ fn live_keybinding_harness_uses_shell_specific_artifact_key_and_keymaps() {
         (
             "fish",
             "fish, version 3.6.0",
-            "ctrl-x",
+            r#"\cx"#,
             "HASHAI_DOCTOR_FISH_BIN",
         ),
     ] {
