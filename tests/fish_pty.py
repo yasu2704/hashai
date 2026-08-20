@@ -2,7 +2,13 @@
 """Run Fish command groups through a real PTY with marker synchronization."""
 import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
-PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
+locale_name = next((os.environ[key] for key in ("LC_ALL", "LC_CTYPE", "LANG") if key in os.environ), "")
+TEST_TIMEOUT = float(os.environ.get("HASHAI_FISH_TEST_TIMEOUT", "10"))
+PROGRESS_FRAMES = (
+    ["⠋ generating…".encode(), "⠙ generating…".encode()]
+    if re.search(r"UTF-?8", locale_name, re.IGNORECASE)
+    else ["| generating…".encode(), "/ generating…".encode()]
+)
 
 class ProbeResponder:
     """Return deterministic replies for Fish's startup terminal probes."""
@@ -45,7 +51,7 @@ def terminal_responses(data):
     return ProbeResponder().responses(data)
 
 def write_all(fd, data, responder=None, pending=None):
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + TEST_TIMEOUT
     while data:
         try:
             count = os.write(fd, data)
@@ -68,7 +74,7 @@ def write_all(fd, data, responder=None, pending=None):
         data = data[count:]
 
 def wait_marker(fd, marker, responder, pending, progress):
-    tail = b""; deadline = time.monotonic() + 30
+    tail = b""; deadline = time.monotonic() + TEST_TIMEOUT
     while time.monotonic() < deadline:
         if pending:
             data = bytes(pending); pending.clear()
@@ -133,7 +139,7 @@ def main():
         for index, group in enumerate(groups):
             write_all(master, group, responder, pending)
             if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending, progress)
-        deadline=time.monotonic()+30
+        deadline=time.monotonic()+TEST_TIMEOUT
         retry_capture = time.monotonic() + .5
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")

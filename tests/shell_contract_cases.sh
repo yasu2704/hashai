@@ -28,6 +28,9 @@ if [[ ${HASHAI_BASH_FOREGROUND_HANDOFF:-} == 1 && ${HASHAI_TEST_HANDOFF_ACTIVE:-
     exec python3 "${0%/*}/hashai-handoff.py" "$0" "$@"
 fi
 printf '%s' "${5-}" >"$HASHAI_REQUEST_FILE"
+if [[ -n ${HASHAI_WORKER_TRACE_FILE:-} ]]; then
+    printf '%s %s\n' "$$" "$(ps -o pgid= -p "$$" | tr -d ' ')" >"$HASHAI_WORKER_TRACE_FILE"
+fi
 case ${HASHAI_TEST_MODE:-success} in
     success) printf '%s\n' "printf '日本語 😀  spaced'" ;;
     review)
@@ -54,7 +57,7 @@ case ${HASHAI_TEST_MODE:-success} in
         ;;
     interruptible)
         : "${HASHAI_SIGNAL_FILE:?}"
-        trap 'printf "INT\n" >>"$HASHAI_SIGNAL_FILE"; printf "%s\n" "fake core cancelled" >&2; exit 7' INT
+        trap 'printf "INT\n" >>"$HASHAI_SIGNAL_FILE"; printf "%s\n" "fake core cancelled" >&2; if [[ ${HASHAI_INTERRUPT_SUCCESS:-} == 1 ]]; then printf success >"$HASHAI_INTERRUPT_SUCCESS_FILE"; printf "%s\n" "printf '\''must not install cancelled output'\''"; exit 0; fi; exit 7' INT
         while :; do
             sleep 0.02
         done
