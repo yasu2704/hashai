@@ -2,6 +2,8 @@
 """Run Fish command groups through a real PTY with marker synchronization."""
 import errno, fcntl, os, pty, re, select, signal, subprocess, sys, termios, time
 
+PROGRESS_FRAMES = ["⠋".encode(), "⠙".encode()]
+
 class ProbeResponder:
     """Return deterministic replies for Fish's startup terminal probes."""
     def __init__(self): self.tail = b""
@@ -65,20 +67,40 @@ def write_all(fd, data, responder=None, pending=None):
             continue
         data = data[count:]
 
-def wait_marker(fd, marker, responder, pending):
+def wait_marker(fd, marker, responder, pending, progress):
     tail = b""; deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if pending:
             data = bytes(pending); pending.clear()
+            maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
-            if seen: return
+            if seen:
+                wait_until_quiet(fd, responder, pending, progress)
+                return
         if select.select([fd], [], [], .1)[0]:
             data = os.read(fd, 4096)
             for reply in responder.responses(data): write_all(fd, reply)
             sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
+            maybe_release_progress(fd, data, progress)
             seen, tail = marker_seen(tail, data, marker)
-            if seen: return
+            if seen:
+                wait_until_quiet(fd, responder, pending, progress)
+                return
     raise RuntimeError("Fish did not emit readiness marker")
+
+def wait_until_quiet(fd, responder, pending, progress):
+    """Wait for the completed widget's repaint before sending the next key."""
+    quiet_until = time.monotonic() + .1
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        timeout = max(0, quiet_until - time.monotonic())
+        if not select.select([fd], [], [], timeout)[0]:
+            return
+        data = os.read(fd, 4096)
+        for reply in responder.responses(data): write_all(fd, reply, pending=pending)
+        sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
+        maybe_release_progress(fd, data, progress)
+        quiet_until = time.monotonic() + .1
 
 def marker_seen(tail, data, marker):
     combined = tail + data
@@ -86,11 +108,22 @@ def marker_seen(tail, data, marker):
         return True, b""
     return False, combined[-(len(marker)-1):]
 
+def maybe_release_progress(fd, data, progress):
+    release = os.environ.get("HASHAI_PROGRESS_RELEASE_FILE")
+    if not release or os.path.exists(release): return
+    progress.extend(data)
+    first = progress.find(PROGRESS_FRAMES[0])
+    second = progress.find(PROGRESS_FRAMES[1], first + len(PROGRESS_FRAMES[0])) if first >= 0 else -1
+    if second >= 0:
+        if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1": os.write(fd, b"\x03")
+        with open(release, "xb"): pass
+
 def main():
     groups = open(sys.argv[1], "rb").read().split(b"\0")
     master, slave = pty.openpty()
     responder = ProbeResponder()
     pending = bytearray()
+    progress = bytearray()
     def controlling_tty():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
@@ -99,14 +132,19 @@ def main():
     try:
         for index, group in enumerate(groups):
             write_all(master, group, responder, pending)
-            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending)
+            if index + 1 < len(groups): wait_marker(master, b"__HASHAI_FISH_READY__", responder, pending, progress)
         deadline=time.monotonic()+30
+        retry_capture = time.monotonic() + .5
         while proc.poll() is None:
             if time.monotonic()>deadline: raise RuntimeError("Fish did not exit")
+            if os.environ.get("HASHAI_PROGRESS_CANCEL") == "1" and time.monotonic() >= retry_capture:
+                os.write(master, b"\x14")
+                retry_capture = time.monotonic() + .5
             if select.select([master], [], [], .1)[0]:
                 try:
                     data = os.read(master,4096)
                     for reply in responder.responses(data): write_all(master, reply)
+                    maybe_release_progress(master, data, progress)
                     sys.stdout.buffer.write(data); sys.stdout.buffer.flush()
                 except OSError: pass
         return proc.wait()

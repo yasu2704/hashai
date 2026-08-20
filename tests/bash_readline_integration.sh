@@ -4,6 +4,8 @@ set -euo pipefail
 
 : "${HASHAI_BIN:?set HASHAI_BIN to the compiled hashai binary}"
 : "${HASHAI_BASH_BIN:=bash}"
+HASHAI_BIN=$(cd "$(dirname "$HASHAI_BIN")" && pwd -P)/$(basename "$HASHAI_BIN")
+export TERM=xterm-256color LANG=C.UTF-8
 # shellcheck source=shell_contract_cases.sh
 source tests/shell_contract_cases.sh
 
@@ -39,6 +41,15 @@ done
 
 fake_bin="$test_dir/bin"
 write_shell_contract_fake "$fake_bin" bash
+real_bin="$test_dir/real-bin"
+mkdir "$real_bin"
+ln -s "$HASHAI_BIN" "$real_bin/hashai"
+cat >"$test_dir/cancel-codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while :; do sleep 0.02; done
+EOF
+chmod +x "$test_dir/cancel-codex"
 
 assert_file_equals() {
     local expected=$1 actual=$2
@@ -71,7 +82,7 @@ EOF
 run_binding_dispatch() {
     local artifact_path=${1:-$artifact} mode=${2:-noauto} dispatch_line=${3:-'@@ dispatch 日本語 😀'} point=${4:-5} trigger=${5:-'@@ '}
     local request="$test_dir/dispatch-request" result="$test_dir/dispatch-result" bindings="$test_dir/dispatch-bindings" commands="$test_dir/dispatch-commands"
-    local characters moves=
+    local characters moves='' command_path=$fake_bin
     characters=${#dispatch_line}
     while (( characters > point )); do
         moves+='\e[D'
@@ -86,6 +97,11 @@ __hashai_capture() {
 source '$artifact_path'
 bind -X >'$bindings'
 bind -x '"\\C-a":__hashai_capture'
+source <(declare -f __hashai_bash_replace_line | sed '1s/__hashai_bash_replace_line/__hashai_bash_real/')
+__hashai_bash_replace_line() {
+    __hashai_bash_real
+    printf '%s\n' '__HASHAI_BASH_''READY__' >&2
+}
 EOF
     printf '\0' >>"$commands"
     # Ctrl-X is the installed artifact binding; Ctrl-A is solely the test
@@ -93,7 +109,16 @@ EOF
     # The fake consumes stdin while Ctrl-X is running, so the capture key must
     # be a later PTY group rather than bytes queued behind the Core request.
     printf '%s%b\030\0\001' "$dispatch_line" "$moves" >>"$commands"
-    if ! PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=bash HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
+    local -a progress_env=()
+    if [[ $mode == blocking || $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$test_dir/progress-release")
+        rm -f "$test_dir/progress-release"
+    fi
+    if [[ $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_CODEX_BIN="$test_dir/cancel-codex" XDG_CONFIG_HOME="$test_dir/config")
+        command_path=$real_bin
+    fi
+    if ! env "${progress_env[@]}" TERM=xterm-256color LANG=C.UTF-8 PATH="$command_path:$PATH" HASHAI_EXPECTED_SHELL=bash HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
         HASHAI_AUTOEXEC_MARKER="$test_dir/autoexecuted" HASHAI_TRIGGER="$trigger" \
         python3 tests/bash_readline_pty.py "$commands" >"$test_dir/dispatch.log"; then
         cat "$test_dir/dispatch.log" >&2
@@ -155,6 +180,20 @@ if ! cmp -s "$test_dir/expected-dispatch-request" "${files[0]}"; then
 fi
 assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
 test ! -e "$test_dir/autoexecuted"
+
+# AC-1: a blocking Core is mechanically released only after Bash's transient
+# status frame appears through the real installed Ctrl-X binding.
+readarray -t files < <(run_binding_dispatch "$artifact" blocking '@@ dispatch 日本語 😀' 5 '@@ ')
+assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
+assert_file_equals "$test_dir/expected-success" "${files[1]}"
+test -e "$test_dir/progress-release"
+grep -F 'generating…' "$test_dir/dispatch.log" >/dev/null
+
+# AC-6: literal Ctrl-C reaches the foreground worker exactly once; the prompt
+# survives and the original editor state is restored for the next binding.
+readarray -t files < <(run_binding_dispatch "$artifact" interruptible '@@ dispatch 日本語 😀' 5 '@@ ')
+printf '%s\n%s\n' '@@ dispatch 日本語 😀' 5 >"$test_dir/expected-cancelled"
+assert_file_equals "$test_dir/expected-cancelled" "${files[1]}"
 
 # A disabled artifact has no baked Ctrl-X binding. A direct production-widget
 # invocation is still inert due to its own enabled guard: no Core call and no

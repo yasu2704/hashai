@@ -73,6 +73,15 @@ run_tty() {
     local commands="$test_dir/commands" setup="$test_dir/zle-setup" buffer="$test_dir/buffer" cursor="$test_dir/cursor"
     local request="$test_dir/request" binding="$test_dir/binding" setup_buffer="$test_dir/setup-buffer"
     local line_length=${#line} move_count left_moves=
+    local -a progress_env=()
+    if [[ $mode == blocking || $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$test_dir/progress-release")
+        rm -f "$test_dir/progress-release"
+    fi
+    if [[ $mode == interruptible ]]; then
+        progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$test_dir/signal-relay")
+        : >"$test_dir/signal-relay"
+    fi
     if [[ $line == "$HASHAI_CONTRACT_REQUEST" ]]; then
         load_from_file=$canonical_request
     fi
@@ -133,7 +142,7 @@ EOF
     else
         printf '%s%s\030\0\024' "$line" "$left_moves" >>"$commands"
     fi
-    if ! PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
+    if ! env "${progress_env[@]}" LANG=C.UTF-8 PATH="$fake_bin:$PATH" HASHAI_EXPECTED_SHELL=zsh HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$request" HASHAI_KEYBINDING=ctrl-g \
         HASHAI_TRIGGER="$trigger" HASHAI_ZSH_BIN="$HASHAI_ZSH_BIN" \
         python3 tests/zsh_zle_pty.py "$commands" >"$test_dir/tty.log"; then
         printf '%s\n' 'Zsh PTY runner failed; log follows:' >&2
@@ -219,6 +228,21 @@ assert_file_equals "$test_dir/expected-request" "$TTY_REQUEST"
 # The test-only setup widget was actually used before literal Ctrl-G and
 # retained the canonical tab-containing bytes exactly in ZLE's BUFFER.
 assert_file_equals "$canonical_request" "$TTY_SETUP_BUFFER"
+
+# AC-1: release follows two ordered ZLE suffix frames, never a fixed sleep.
+run_tty "$artifact" blocking "$original" 5 e '# '
+test -e "$test_dir/progress-release"
+assert_file_equals "$test_dir/expected-success-buffer" "$TTY_BUFFER"
+assert_file_equals "$test_dir/expected-success-cursor" "$TTY_CURSOR"
+grep -F 'generating…' "$TTY_LOG" >/dev/null
+
+# AC-6: literal Ctrl-C relays exactly one SIGINT and restores editor state.
+run_tty "$artifact" interruptible "$original" 5 e '# '
+assert_file_equals "$canonical_request" "$TTY_BUFFER"
+printf '%s\n' 5 >"$test_dir/expected-original-cursor"
+assert_file_equals "$test_dir/expected-original-cursor" "$TTY_CURSOR"
+printf '%s\n' INT >"$test_dir/expected-signal-relay"
+assert_file_equals "$test_dir/expected-signal-relay" "$test_dir/signal-relay"
 
 # AC-1/AC-5: stderr risk warnings survive the real ZLE PTY dispatch without
 # changing the replacement/cursor/request contract or executing the command.

@@ -7,9 +7,37 @@ __hashai_bash_trigger='# '
 __hashai_bash_keybinding='\C-g'
 __hashai_bash_enabled=1
 
+__hashai_bash_progress_capabilities() {
+    [[ ${TERM:-dumb} != dumb ]] || return 1
+    command -v tput >/dev/null 2>&1 || return 1
+    __hashai_bash_progress_cr=$(tput cr 2>/dev/null) || return 1
+    __hashai_bash_progress_el=$(tput el 2>/dev/null) || return 1
+}
+
+__hashai_bash_progress_frames() {
+    local locale_name=${LC_ALL:-${LC_CTYPE:-${LANG:-}}}
+    locale_name=${locale_name^^}
+    if [[ $locale_name == *UTF-8* || $locale_name == *UTF8* ]]; then
+        __hashai_bash_progress_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+    else
+        __hashai_bash_progress_frames=('|' / - "\\")
+    fi
+}
+
+__hashai_bash_progress_draw() {
+    local frame=$1
+    printf '%s%s%s generating…' "$__hashai_bash_progress_cr" "$__hashai_bash_progress_el" "$frame" >&2
+}
+
+__hashai_bash_progress_clear() {
+    [[ ${__hashai_bash_progress_visible:-0} == 1 ]] || return 0
+    printf '%s%s' "$__hashai_bash_progress_cr" "$__hashai_bash_progress_el" >&2
+    __hashai_bash_progress_visible=0
+}
+
 __hashai_bash_replace_line() {
     local trigger=${HASHAI_TRIGGER:-$__hashai_bash_trigger}
-    local request command output
+    local request command output error status original_line original_point
 
     # The binding installer is normally the only entry point, but retaining
     # this guard also makes an explicitly disabled generated artifact inert if
@@ -21,14 +49,45 @@ __hashai_bash_replace_line() {
     [[ -t 0 && -t 1 && -t 2 ]] || return 0
     [[ $READLINE_LINE == "$trigger"* ]] || return 0
 
-    request=${READLINE_LINE#"$trigger"}
-    if ! output=$(mktemp "${TMPDIR:-/tmp}/hashai-readline.XXXXXX"); then
+    if ! __hashai_bash_progress_capabilities; then
+        printf '%s\n' 'hashai: terminal progress display unavailable; input preserved' >&2
+        return 0
+    fi
+
+    original_line=$READLINE_LINE
+    original_point=$READLINE_POINT
+    request=${original_line#"$trigger"}
+    if ! output=$(mktemp "${TMPDIR:-/tmp}/hashai-readline-out.XXXXXX"); then
+        printf '%s\n' 'hashai: could not prepare command output; input preserved' >&2
+        return 0
+    fi
+    if ! error=$(mktemp "${TMPDIR:-/tmp}/hashai-readline-err.XXXXXX"); then
+        rm -f -- "$output"
+        printf '%s\n' 'hashai: could not prepare command output; input preserved' >&2
+        return 0
+    fi
+    if [[ ! -f $output || -L $output || ! -f $error || -L $error ]]; then
+        rm -f -- "$output" "$error"
         printf '%s\n' 'hashai: could not prepare command output; input preserved' >&2
         return 0
     fi
 
-    if ! command hashai generate --shell bash -- "$request" >"$output"; then
-        rm -f -- "$output"
+    __hashai_bash_progress_frames
+    __hashai_bash_progress_visible=1
+    printf '\n' >&2
+    __hashai_bash_progress_draw "${__hashai_bash_progress_frames[0]}"
+    # Bash has no public callback-time redisplay API. Keep Core in the terminal
+    # foreground and use one transient frame without a background timer.
+    HASHAI_BASH_FOREGROUND_HANDOFF=1 command hashai generate --shell bash -- "$request" >"$output" 2>"$error"
+    status=$?
+    __hashai_bash_progress_clear
+    if [[ -s $error ]]; then
+        cat -- "$error" >&2 || printf '%s\n' 'hashai: could not forward command diagnostic; input preserved' >&2
+    fi
+    if (( status != 0 )); then
+        rm -f -- "$output" "$error"
+        READLINE_LINE=$original_line
+        READLINE_POINT=$original_point
         printf '%s\n' 'hashai: command generation failed; input preserved' >&2
         return 0
     fi
@@ -38,7 +97,7 @@ __hashai_bash_replace_line() {
     # record delimiter afterwards. Bash variables cannot represent NUL, which
     # is outside the Core command-string contract.
     command=$(cat -- "$output"; printf x)
-    rm -f -- "$output"
+    rm -f -- "$output" "$error"
     command=${command%x}
     if [[ $command != *$'\n' ]]; then
         printf '%s\n' 'hashai: malformed command output; input preserved' >&2
