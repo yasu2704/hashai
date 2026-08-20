@@ -2,12 +2,14 @@
 """Run an interactive Zsh command file through a real PTY with a timeout."""
 
 import errno
+import fcntl
 import os
 import pty
 import select
 import signal
 import subprocess
 import sys
+import termios
 import time
 
 
@@ -110,13 +112,17 @@ def main() -> int:
     with open(sys.argv[1], "rb") as commands_file:
         command_groups = commands_file.read().split(b"\0")
     master, slave = pty.openpty()
+    def controlling_tty() -> None:
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
     process = subprocess.Popen(
         [os.environ.get("HASHAI_ZSH_BIN", "zsh"), "-f", "-i"],
         stdin=slave,
         stdout=slave,
         stderr=slave,
         close_fds=True,
-        preexec_fn=os.setsid,
+        preexec_fn=controlling_tty,
     )
     os.close(slave)
     os.set_blocking(master, False)

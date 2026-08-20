@@ -67,7 +67,7 @@ bind \\cy __fish_edit_buffer
 echo '__HASHAI_FISH_'READY__
 EOF
 if [[ $b == __NORMALIZED_MULTILINE__ ]]; then printf '\031\0\030\0\024' >>"$d/cmd"; else printf '%s%s\030\0\024' "$b" "$moves" >>"$d/cmd"; fi
-if ! (cd "$d" && env "${progress_env[@]}" TERM=xterm-256color LANG=C.UTF-8 PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
+if ! (cd "$d" && env ${progress_env[@]+"${progress_env[@]}"} TERM=xterm-256color LANG=C.UTF-8 PATH="$d/bin:$PATH" HASHAI_EXPECTED_SHELL=fish HASHAI_TEST_MODE="$mode" HASHAI_REQUEST_FILE="$d/request" HASHAI_TRIGGER="$trigger" HASHAI_KEYBINDING=ctrl-g HASHAI_AUTOEXEC_MARKER="$d/auto" VISUAL="$d/editor" EDITOR="$d/editor" HASHAI_FISH_BIN="$HASHAI_FISH_BIN" python3 "$fish_pty" "$d/cmd") >"$d/log"; then
     cat "$d/log" >&2
     return 1
 fi

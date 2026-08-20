@@ -20,7 +20,7 @@ __hashai_bash_progress_frames() {
     if [[ $locale_name == *UTF-8* || $locale_name == *UTF8* ]]; then
         __hashai_bash_progress_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     else
-        __hashai_bash_progress_frames=('|' / - '\')
+        __hashai_bash_progress_frames=('|' / - "\\")
     fi
 }
 
