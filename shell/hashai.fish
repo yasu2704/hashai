@@ -67,8 +67,11 @@ function __hashai_fish_replace_buffer
 
     command hashai generate --shell fish -- "$request" >"$stdout_file" 2>"$stderr_file" &
     set -l worker $last_pid
+    set -g __hashai_fish_stdout_file "$stdout_file"
+    set -g __hashai_fish_stderr_file "$stderr_file"
     set -g __hashai_fish_worker_pid $worker
     set -g __hashai_fish_int_relayed 0
+    set -e __hashai_fish_cancel_cleanup_done
     functions -e __hashai_fish_worker_int 2>/dev/null
     function __hashai_fish_worker_int --on-signal INT
         if set -q __hashai_fish_worker_pid; and test "$__hashai_fish_int_relayed" = 0
@@ -80,6 +83,16 @@ function __hashai_fish_replace_buffer
     functions -e __hashai_fish_worker_exit 2>/dev/null
     function __hashai_fish_worker_exit --on-process-exit $worker
         set -g __hashai_fish_worker_status $argv[3]
+        if test "$__hashai_fish_int_relayed" = 1
+            if test -s "$__hashai_fish_stderr_file"
+                command cat -- "$__hashai_fish_stderr_file" >&2
+                or echo 'hashai: could not forward command diagnostic; input preserved' >&2
+            end
+            command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
+            echo 'hashai: command generation failed;' 'input preserved' >&2
+            set -g __hashai_fish_cancel_cleanup_done 1
+            set -e __hashai_fish_worker_active
+        end
     end
     set -l frame_index 1
     printf '\n%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
@@ -89,6 +102,16 @@ function __hashai_fish_replace_buffer
         set frame_index (math "$frame_index % "(count $frames)" + 1")
         printf '%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
     end
+    if set -q __hashai_fish_cancel_cleanup_done
+        functions -e __hashai_fish_worker_exit
+        functions -e __hashai_fish_worker_int
+        set -e __hashai_fish_worker_status __hashai_fish_cancel_cleanup_done
+        set -e __hashai_fish_worker_pid __hashai_fish_int_relayed
+        set -e __hashai_fish_stdout_file __hashai_fish_stderr_file
+        printf '%s%s' "$progress_cr" "$progress_el" >&2
+        commandline -f repaint
+        return 0
+    end
     # The exit event is the status source of truth. A single wait on this
     # known child reaps Fish's completed job entry without another diagnostic.
     wait $worker
@@ -97,6 +120,7 @@ function __hashai_fish_replace_buffer
     functions -e __hashai_fish_worker_int
     set -e __hashai_fish_worker_status
     set -e __hashai_fish_worker_pid __hashai_fish_int_relayed
+    set -e __hashai_fish_stdout_file __hashai_fish_stderr_file
     printf '%s%s' "$progress_cr" "$progress_el" >&2
     if test -s "$stderr_file"
         command cat -- "$stderr_file" >&2

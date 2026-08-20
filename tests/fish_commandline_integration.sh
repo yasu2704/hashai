@@ -72,8 +72,8 @@ source '$artifact'
 bind -M default \\cx >'$d/binding.default'
 bind -M insert \\cx >'$d/binding.insert'
 functions -c __hashai_fish_replace_buffer __hashai_fish_real
-function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; jobs -p >'$d/jobs'; echo '__HASHAI_FISH_'READY__ >&2; end
-function __fish_capture; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
+function __hashai_fish_replace_buffer; set -l raw (commandline --current-buffer | string collect -N); string match -rq '^(?<exposed>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$exposed" >'$d/exposed'; __hashai_fish_real; echo '__HASHAI_FISH_'READY__ >&2; end
+function __fish_capture; jobs -p >'$d/jobs'; set -l raw (commandline | string collect -N); string match -rq '^(?<captured>(?s:.*))\\n\\z' -- "\$raw"; printf %s "\$captured" >'$d/buffer'; commandline --cursor >'$d/cursor'; commandline -r exit; commandline -f execute; end
 bind \\ct __fish_capture
 bind -M insert \\ct __fish_capture
 function __fish_edit_buffer; edit_command_buffer; echo '__HASHAI_FISH_'READY__ >&2; end
