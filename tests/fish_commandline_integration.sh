@@ -66,7 +66,7 @@ mkdir "$d/bin"
 command -v pgrep >/dev/null
 write_shell_contract_fake "$d/bin" fish
 printf '%s\n' '#!/usr/bin/env bash' "printf '%s' \$'# first natural language\\n日本語 😀 second line' >\"\$1\"" >"$d/editor"; chmod +x "$d/editor"
-run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local setup_binding=; local mode_setup= length moves=; local -a progress_env=(); [[ ${7:-} == disabled ]] || setup_binding="bind -M $map \\cx __hashai_fish_replace_buffer"; [[ $map == insert ]] && mode_setup=$'fish_vi_key_bindings\nset -g fish_bind_mode insert'; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; : >"$d/worker-trace"; if [[ $mode == blocking || $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$d/progress-release"); rm -f "$d/progress-release"; fi; if [[ $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$d/signal-relay"); : >"$d/signal-relay"; fi; cat >"$d/cmd" <<EOF
+run() { local mode=$1; local b=$2; local c=$3; local map=${4:-default}; local trigger=${5:-'# '}; local artifact=${6:-$a}; local setup_binding=; local mode_setup= length moves=; local -a progress_env=(); [[ ${7:-} == disabled ]] || setup_binding="bind -M $map \\cx __hashai_fish_replace_buffer"; [[ $map == insert ]] && mode_setup=$'fish_vi_key_bindings\nset -g fish_bind_mode insert'; length=$("$HASHAI_FISH_BIN" -c 'string length -- "$argv[1]"' -- "$b"); while (( length > c )); do moves+=$'\e[D'; ((length--)); done; : >"$d/request"; : >"$d/worker-trace"; : >"$d/worker-active-status"; : >"$d/worker-int-status"; : >"$d/worker-exit-status"; if [[ $mode == blocking || $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_RELEASE_FILE="$d/progress-release"); rm -f "$d/progress-release"; fi; if [[ $mode == interruptible ]]; then progress_env+=(HASHAI_PROGRESS_CANCEL=1 HASHAI_SIGNAL_FILE="$d/signal-relay"); : >"$d/signal-relay"; fi; cat >"$d/cmd" <<EOF
 $mode_setup
 $setup_binding
 source '$artifact'
@@ -211,8 +211,12 @@ test "$(grep -Fc 'commandline --replace -- corrupted; commandline --cursor 0' "$
 run failure "$original" 5 default '# ' "$failure_mutated"; printf '%s' "$original" >"$d/expected"; if cmp -s "$d/expected" "$d/buffer"; then printf 'failure mutation was not detected\n' >&2; exit 1; fi
 cleanup_mutated="$d/hashai.cleanup-mutated.fish"
 awk '/^function __hashai_fish_cleanup_worker_state$/ { cleanup = 1 } cleanup && /set -e -g __hashai_fish_worker_active/ { removed++; next } cleanup && /^end$/ { cleanup = 0 } { print } END { if (removed != 1) exit 1 }' "$a" >"$cleanup_mutated"
+test "$(grep -Fc 'set -e -g __hashai_fish_worker_active' "$cleanup_mutated")" -eq 0
+"$HASHAI_FISH_BIN" -n "$cleanup_mutated"
 if run success "$original" 5 default '# ' "$cleanup_mutated"; then
     printf 'worker cleanup mutation was not detected\n' >&2
     exit 1
 fi
+test -s "$d/worker-active-status"
+test "$(cat "$d/worker-active-status")" -eq 0 || { printf 'cleanup mutation failed for the wrong reason\n' >&2; exit 1; }
 printf 'Fish commandline PTY integration checks passed.\n'

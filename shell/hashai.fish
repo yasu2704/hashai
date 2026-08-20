@@ -4,14 +4,17 @@ set -g __hashai_fish_trigger '# '
 set -g __hashai_fish_keybinding \cg
 set -g __hashai_fish_enabled_config 1
 
+# Worker event state is global because Fish event handlers cannot capture the
+# widget's locals. Keep its teardown explicit and centralized here.
 function __hashai_fish_cleanup_worker_state
-    functions -e __hashai_fish_worker_int 2>/dev/null
-    functions -e __hashai_fish_worker_exit 2>/dev/null
+    functions -e __hashai_fish_worker_int
+    functions -e __hashai_fish_worker_exit
     set -e -g __hashai_fish_worker_active
-    set -e -g __hashai_fish_worker_status __hashai_fish_cancel_cleanup_done
+    set -e -g __hashai_fish_worker_status
     set -e -g __hashai_fish_worker_pid __hashai_fish_int_relayed
     set -e -g __hashai_fish_stdout_file __hashai_fish_stderr_file
     set -e -g __hashai_fish_progress_cr __hashai_fish_progress_el
+    return 0
 end
 
 function __hashai_fish_replace_buffer
@@ -105,8 +108,8 @@ function __hashai_fish_replace_buffer
             end
             command rm -f -- "$__hashai_fish_stdout_file" "$__hashai_fish_stderr_file"
             echo 'hashai: command generation failed; input preserved' >&2
-            __hashai_fish_cleanup_worker_state
             set -g __hashai_fish_cancel_cleanup_done 1
+            __hashai_fish_cleanup_worker_state
         end
     end
     set -l frame_index 1
@@ -118,6 +121,7 @@ function __hashai_fish_replace_buffer
         printf '%s%s%s generating…' "$progress_cr" "$progress_el" "$frames[$frame_index]" >&2
     end
     if set -q __hashai_fish_cancel_cleanup_done
+        set -e -g __hashai_fish_cancel_cleanup_done
         __hashai_fish_cleanup_worker_state
         printf '%s%s' "$progress_cr" "$progress_el" >&2
         commandline -f repaint
