@@ -174,8 +174,8 @@ assert_file_equals "$test_dir/expected-success" "${files[1]}"
 test -e "$test_dir/progress-release"
 grep -F 'generating…' "$test_dir/dispatch.log" >/dev/null
 
-# AC-6: literal Ctrl-C is relayed once to the worker; the prompt survives and
-# the original editor state is restored for the subsequent capture binding.
+# AC-6: SIGINT during the callback is relayed once to the worker; the prompt
+# survives and the original editor state is restored for the next binding.
 readarray -t files < <(run_binding_dispatch "$artifact" interruptible '@@ dispatch 日本語 😀' 5 '@@ ')
 assert_file_equals "$test_dir/expected-dispatch-request" "${files[0]}"
 printf '%s\n%s\n' '@@ dispatch 日本語 😀' 5 >"$test_dir/expected-cancelled"
