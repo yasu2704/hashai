@@ -100,6 +100,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           trace_dir=$(mktemp -d)
+          chmod 777 "$trace_dir"
           docker run --rm --entrypoint fish purefish/docker-fish:3.6.3 --version
           docker run --rm -v "$PWD:/src:ro" --entrypoint fish purefish/docker-fish:3.6.3 -n /src/shell/hashai.fish /src/tests/fish_process_exit_probe.fish
           docker run --rm -v "$PWD:/src:ro" -v "$trace_dir:/trace" --entrypoint fish purefish/docker-fish:3.6.3 /src/tests/fish_process_exit_probe.fish /trace
